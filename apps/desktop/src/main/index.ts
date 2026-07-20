@@ -34,7 +34,13 @@ import {
 import * as github from "./github";
 import { publishToGitHub } from "./github-publish";
 import { parseGitHubRemote } from "../shared/github";
-import { AuthCancelledError, AuthTimeoutError, startAuthListener, type AuthListener } from "./auth-server";
+import {
+  AuthCancelledError,
+  AuthExpiredError,
+  AuthTimeoutError,
+  startBrowserSignIn,
+  type BrowserSignIn,
+} from "./auth-device";
 import { AgentRuntime } from "./agent-runtime";
 import * as gitService from "./git";
 import { loadState, saveState } from "./state-store";
@@ -285,25 +291,23 @@ function registerIpc(): void {
     }
   });
 
-  // Browser sign-in: a one-shot loopback listener + the wello.dev/code-auth page.
-  // The user confirms in the browser (already signed in there = one click); the
-  // page mints a `wlo_live_…` key and delivers it here. The app never sees the
-  // account password — it holds only its own key (keychain).
-  let pendingAuth: AuthListener | null = null;
+  // Browser sign-in: a device-authorization flow against the gateway plus the
+  // wello.dev/code-auth page. The user confirms in the browser (already signed in
+  // there = one click) and we collect the `wlo_live_…` key by polling over HTTPS.
+  // The app never sees the account password — it holds only its own key (keychain).
+  let pendingAuth: BrowserSignIn | null = null;
   ipcMain.handle("wello.signInViaBrowser", async (): Promise<Connection> => {
-    pendingAuth?.cancel(); // a re-click restarts the wait with a fresh state
-    let listener: AuthListener;
+    pendingAuth?.cancel(); // a re-click restarts the wait with a fresh session
+    let session: BrowserSignIn;
     try {
-      listener = await startAuthListener();
+      session = await startBrowserSignIn();
     } catch {
-      return { connected: false, error: "Не удалось начать вход. Попробуйте ещё раз." };
+      return { connected: false, error: "Не удалось начать вход. Проверьте связь и попробуйте ещё раз." };
     }
-    pendingAuth = listener;
-    void shell.openExternal(
-      `https://wello.dev/code-auth?port=${listener.port}&state=${listener.state}`,
-    );
+    pendingAuth = session;
+    void shell.openExternal(session.verifyUrl);
     try {
-      const key = await listener.key;
+      const key = await session.key;
       const access = await fetchAccess(key);
       await setApiKey(key);
       return toConnection(access);
@@ -315,9 +319,15 @@ function registerIpc(): void {
           error: "Время ожидания вышло. Нажмите «Войти через браузер» и подтвердите вход заново.",
         };
       }
+      if (err instanceof AuthExpiredError) {
+        return {
+          connected: false,
+          error: "Запрос на вход истёк. Нажмите «Войти через браузер» и подтвердите вход заново.",
+        };
+      }
       return { connected: false, error: err instanceof Error ? err.message : "Не удалось войти." };
     } finally {
-      if (pendingAuth === listener) pendingAuth = null;
+      if (pendingAuth === session) pendingAuth = null;
     }
   });
 
