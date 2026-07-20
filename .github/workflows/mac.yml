@@ -1,0 +1,88 @@
+name: macOS build
+
+# Not on every push: a macOS run is slow, and the build is only interesting when
+# we are about to ship one. Trigger it by hand, or automatically on a release tag.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    name: build · verify · photograph
+    # macos-latest is Apple Silicon, which is what we target: arm64 covers every
+    # Mac sold since late 2020.
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      # No `version:` — package.json pins packageManager, and action-setup refuses
+      # when a version is declared twice.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @wello-code/desktop build
+
+      # Ad-hoc signed (see electron-builder.yml). No secrets are involved: the
+      # signature carries no identity, which is all Apple Silicon requires in order
+      # to execute the code at all.
+      - name: Package
+        run: pnpm --filter @wello-code/desktop exec electron-builder --mac
+
+      # The agent binary arrives via an optionalDependency that only installs on
+      # arm64 macOS. If that ever stops resolving, the app still builds and still
+      # launches — it just cannot start the engine, which is a silent failure we
+      # would otherwise ship. Fail loudly here instead.
+      - name: Verify the agent binary is inside the bundle
+        run: |
+          APP="apps/desktop/release/installer/mac-arm64/Wello Code.app"
+          test -d "$APP" || { echo "no .app at $APP"; ls -R apps/desktop/release/installer | head -40; exit 1; }
+          FOUND=$(find "$APP" -type f -path "*claude-agent-sdk-darwin-arm64*" -perm +111 | head -5)
+          if [ -z "$FOUND" ]; then
+            echo "FAIL: no executable from claude-agent-sdk-darwin-arm64 inside the bundle."
+            echo "The app would install and open, but no agent run could ever start."
+            find "$APP" -type d -name "@anthropic-ai" | head
+            exit 1
+          fi
+          echo "agent binary present:"; echo "$FOUND"
+
+      # Signing is mandatory on Apple Silicon, so prove it actually happened rather
+      # than assuming the config took effect.
+      - name: Verify the signature
+        run: |
+          APP="apps/desktop/release/installer/mac-arm64/Wello Code.app"
+          codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | tail -5
+          codesign -dv "$APP" 2>&1 | grep -i "signature" || true
+
+      # The one check no automated assertion can make: whether the traffic lights
+      # sit on top of our own controls. Non-blocking — a flaky launch here must not
+      # fail an otherwise good build.
+      - name: Photograph the title bar
+        continue-on-error: true
+        run: |
+          pnpm --filter @wello-code/desktop exec node scripts/mac-shot.mjs \
+            "apps/desktop/release/installer/mac-arm64/Wello Code.app" \
+            "$RUNNER_TEMP/mac-titlebar.png"
+
+      - name: Upload screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-titlebar-screenshot
+          path: ${{ runner.temp }}/mac-titlebar.png
+          if-no-files-found: warn
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: wello-code-mac-arm64
+          path: |
+            apps/desktop/release/installer/*.dmg
+            apps/desktop/release/installer/*.zip
+            apps/desktop/release/installer/*.blockmap
+            apps/desktop/release/installer/latest-mac.yml
+          if-no-files-found: error

@@ -18,6 +18,12 @@ appId: dev.wello.code
 productName: Wello Code
 copyright: Copyright 2026 Wello. Apache License 2.0.
 
+# MUST stay off. The agent SDK spawns its binary straight off disk, and inside an
+# asar archive there is no file to execute. Windows never hit the default because
+# --prepackaged skips packing entirely; the macOS target packs for real, so the
+# default (true) would have shipped a build that cannot start the engine.
+asar: false
+
 directories:
   buildResources: build
   output: release/installer
@@ -26,6 +32,31 @@ win:
   icon: build/icon.ico
   target:
     - nsis
+
+# macOS is packed by electron-builder itself, unlike Windows: renaming an .app is
+# not a rename but surgery (Info.plist, the executable, four helper bundles, the
+# icon, then a re-sign), and getting that wrong yields a bundle that will not
+# launch. The platform binary it needs is declared as an optionalDependency of this
+# package, so pnpm installs it on an arm64 runner and skips it everywhere else,
+# which is what makes the normal dependency walk work here.
+mac:
+  category: public.app-category.developer-tools
+  icon: build/icon.icns
+  # Ad-hoc signature. NOT cosmetic: since 2020 Apple Silicon refuses to execute
+  # unsigned arm64 code at all, so without this the app simply would not start.
+  # It needs no certificate and no Apple account. Gatekeeper still asks the user
+  # to confirm the first launch of a downloaded build — only notarisation removes
+  # that, and notarisation needs the paid programme.
+  identity: "-"
+  # Ad-hoc + the hardened runtime (electron-builder's default) is a known crash:
+  # library validation rejects the ad-hoc-signed frameworks and the app dies on
+  # launch. Off until there is a real Developer ID to sign with.
+  hardenedRuntime: false
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
 
 nsis:
   # A wizard, not a one-click surprise install: people downloading an unsigned
