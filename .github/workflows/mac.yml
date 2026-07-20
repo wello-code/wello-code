@@ -31,11 +31,17 @@ jobs:
       # signature carries no identity, which is all Apple Silicon requires in order
       # to execute the code at all.
       - name: Package
-        # Verbose on purpose: the job logs are the only window into this build for
+        # --publish never is required, not tidiness: electron-builder detects CI and
+        # starts publishing a GitHub release on its own because the config carries a
+        # `publish` section (which is there for the updater's metadata, not to upload
+        # from here). With no GH_TOKEN that self-started upload fails and takes the
+        # whole run down AFTER the app, dmg and zip have all been built successfully.
+        #
+        # Verbose on purpose: these logs are the only window into this build for
         # anyone without a Mac, and a bare "exit code 1" costs a whole round trip.
         env:
           DEBUG: electron-builder
-        run: pnpm --filter @wello-code/desktop exec electron-builder --mac
+        run: pnpm --filter @wello-code/desktop exec electron-builder --mac --publish never
 
       # Runs even when packaging failed, so the next question is answerable from
       # the log instead of another run: what actually landed on disk?
