@@ -11,9 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # No `version:` on purpose. package.json pins packageManager (pnpm@11.x), and
+      # action-setup v4 REFUSES to start when a version is given in both places
+      # rather than risking a mismatch. That is what failed every run since the
+      # repository was created — before a single one of our own steps ran.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 11
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -30,9 +32,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # No `version:` on purpose. package.json pins packageManager (pnpm@11.x), and
+      # action-setup v4 REFUSES to start when a version is given in both places
+      # rather than risking a mismatch. That is what failed every run since the
+      # repository was created — before a single one of our own steps ran.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 11
       - uses: actions/setup-node@v4
         with:
           node-version: 22
