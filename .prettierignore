@@ -1,0 +1,9 @@
+node_modules/
+dist/
+out/
+build/
+release/
+.vite/
+coverage/
+pnpm-lock.yaml
+promt/

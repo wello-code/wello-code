@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["src"]
+}

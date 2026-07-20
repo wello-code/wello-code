@@ -1,0 +1,6 @@
+{
+  "name": "wello-skills",
+  "version": "1.0.0",
+  "description": "Встроенные скиллы Wello Code: дизайн (taste v2 / frontend-design), создание скиллов и MCP-серверов.",
+  "author": { "name": "Wello" }
+}

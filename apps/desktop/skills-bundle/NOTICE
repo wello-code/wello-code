@@ -1,0 +1,30 @@
+Wello Code — bundled skills
+===========================
+
+This directory bundles a small, curated set of Agent Skills that ship with
+Wello Code and load into every run (subject to the per-skill toggles in
+Settings → «Скиллы»).
+
+Attribution and licensing
+-------------------------
+
+skills/frontend-design      © 2025 Anthropic, PBC — Apache License 2.0
+skills/skill-creator        © 2025 Anthropic, PBC — Apache License 2.0
+skills/mcp-builder          © 2025 Anthropic, PBC — Apache License 2.0
+
+  The three skills above are redistributed from the public repository
+  https://github.com/anthropics/skills under the Apache License, Version 2.0.
+  The full license text is retained inside each skill folder as LICENSE.txt.
+  Files are bundled unmodified.
+
+skills/design-taste-frontend  © 2026 Leonxlnx (Leon Lin) — MIT License
+
+  Redistributed from the public repository https://github.com/Leonxlnx/taste-skill
+  under the MIT License. The full license text is retained inside the skill folder
+  as LICENSE.txt, as the license requires. Bundled unmodified as the default
+  design skill.
+
+Anthropic's proprietary document skills (pdf / docx / xlsx / pptx) are NOT
+bundled: their license forbids redistribution outside Anthropic's own services.
+Users who have access to them through their own Anthropic/Claude subscription
+can add them via Settings → «Плагины и скиллы».

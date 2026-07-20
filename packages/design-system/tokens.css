@@ -1,0 +1,261 @@
+/* Workbench UI v1.1 — source of truth for CSS tokens.
+   Consume semantic tokens in components; primitive tokens are private to themes. */
+
+:root {
+  /* Primitive palette */
+  --gray-0: #ffffff;
+  --gray-25: #fafafa;
+  --gray-50: #f4f4f4;
+  --gray-100: #e8e8e8;
+  --gray-200: #d3d3d3;
+  --gray-300: #b4b4b4;
+  --gray-400: #949494;
+  --gray-500: #797979;
+  --gray-600: #575757;
+  --gray-700: #3a3a3a;
+  --gray-750: #323232;
+  --gray-800: #292929;
+  --gray-850: #202020;
+  --gray-875: #1d1d1d;
+  --gray-900: #1a1a1a;
+  --gray-950: #151515;
+
+  --blue-300: #a6c8ff;
+  --blue-400: #8ab9e8;
+  --green-400: #78c596;
+  --amber-400: #e5b66e;
+  --red-400: #ed8d8d;
+  --purple-300: #c8a5f4;
+  --cyan-300: #a8cfec;
+  --lime-300: #becf98;
+
+  /* Semantic color roles — components must use these, not gray values. */
+  --canvas: var(--gray-950);
+  /* Two-level shell: the chassis (titlebar + sidebar) sits a shade BELOW the
+     work panel, whose rounded top-left corner reads as a tab off the chrome. */
+  --bg-chrome: var(--gray-950);
+  --bg-surface: var(--gray-900);
+  --border-panel: #303030;
+  --surface-0: var(--gray-900);
+  --surface-1: var(--gray-850);
+  --surface-2: var(--gray-800);
+  --surface-3: var(--gray-750);
+  --surface-hover: #303030;
+  --surface-raised: var(--gray-875);
+  --field-bg: #181818;
+  --border-subtle: #2c2c2c;
+  --border-default: var(--gray-700);
+  --border-strong: var(--gray-600);
+  --text-primary: var(--gray-50);
+  --text-secondary: var(--gray-300);
+  --text-muted: var(--gray-500);
+  --text-on-accent: var(--gray-950);
+  --accent: var(--gray-100);
+  --accent-hover: var(--gray-0);
+  --accent-soft: #3b3b3b;
+  --focus: var(--blue-300);
+  --success: var(--green-400);
+  --warning: var(--amber-400);
+  --danger: var(--red-400);
+  --danger-strong: #ffaaaa;
+  --info: var(--blue-400);
+  --code-fg: #cfcfcf;
+  --code-key: var(--purple-300);
+  --code-name: var(--cyan-300);
+  --code-string: var(--lime-300);
+  --code-comment: #777777;
+  --icon-default: var(--text-primary);
+  --icon-secondary: var(--text-secondary);
+  --icon-muted: var(--text-muted);
+  --icon-disabled: color-mix(in srgb, var(--text-muted) 60%, transparent);
+  --editor-selection: #3b4f6b;
+  --editor-line-highlight: rgb(255 255 255 / .05);
+  --editor-gutter: var(--code-comment);
+  --diff-added-bg: #1c3a2a;
+  --diff-added-border: #4f9b70;
+  --diff-added-text: #a7e0b7;
+  --diff-removed-bg: #422525;
+  --diff-removed-border: #b86666;
+  --diff-removed-text: #f0b3b3;
+  --diff-modified-bg: #3d341e;
+  --diff-modified-border: #b99a48;
+  --diff-modified-text: #ebd493;
+  --git-added: var(--success);
+  --git-modified: var(--warning);
+  --git-deleted: var(--danger);
+  --git-conflict: #d89863;
+  --agent-running: var(--info);
+  --agent-awaiting-permission: var(--warning);
+  --agent-complete: var(--success);
+  --agent-error: var(--danger);
+  --permission-safe: var(--success);
+  --permission-warning: var(--warning);
+  --permission-danger: var(--danger);
+
+  /* Typography */
+  --font-ui: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-code: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --font-size-ui: 13px;
+  --line-ui: 1.45;
+
+  /* Spacing, geometry and elevation */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-float: 0 18px 48px rgb(0 0 0 / .38), 0 1px 2px rgb(0 0 0 / .28);
+  --shadow-press: 0 1px 2px rgb(0 0 0 / .16);
+  --elevation-menu: 0 8px 24px rgb(0 0 0 / .28);
+  --elevation-popover: 0 12px 32px rgb(0 0 0 / .32);
+  --elevation-dialog: 0 18px 48px rgb(0 0 0 / .38);
+  --elevation-command-palette: 0 20px 56px rgb(0 0 0 / .42);
+  --z-base: 0;
+  --z-panel: 10;
+  --z-sticky: 20;
+  --z-overlay: 30;
+  --z-modal: 40;
+  --z-toast: 50;
+  --sidebar: 256px;
+  --titlebar: 36px;
+  --control: 32px;
+  --row: 30px;
+  --activity-rail: 48px;
+  --sidebar-min: 220px;
+  --sidebar-max: 360px;
+  --inspector-min: 280px;
+  --inspector-max: 480px;
+  --editor-min: 480px;
+  --bottom-panel-min: 160px;
+  --composer-min: 64px;
+  --composer-max: 240px;
+  --window-min-width: 900px;
+  --window-min-height: 600px;
+  --transition-fast: 120ms;
+  --transition-standard: 180ms;
+  --motion-press: 80ms;
+  --motion-hover: 120ms;
+  --motion-standard: 160ms;
+  --motion-overlay: 180ms;
+  --motion-panel: 220ms;
+  --ease-standard: cubic-bezier(.2, 0, 0, 1);
+  --ease-exit: cubic-bezier(.4, 0, 1, 1);
+  --motion-distance-overlay: 4px;
+  --motion-distance-panel: 12px;
+  --tooltip-delay: 500ms;
+}
+
+/* A lower-contrast mode for long coding sessions. */
+:root[data-theme="dim"] {
+  --canvas: #111111;
+  --bg-chrome: #101010;
+  --bg-surface: #171717;
+  --border-panel: #2b2b2b;
+  --surface-0: #171717;
+  --surface-1: #1c1c1c;
+  --surface-2: #252525;
+  --surface-3: #2e2e2e;
+  --surface-hover: #2a2a2a;
+  --surface-raised: #191919;
+  --field-bg: #131313;
+  --border-subtle: #282828;
+  --border-default: #353535;
+  --border-strong: #525252;
+  --text-primary: #ededed;
+  --text-secondary: #ababab;
+}
+
+/* Light is a complete semantic re-map, not a second component stylesheet. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --canvas: #f8f8f7;
+  /* Light chassis: a touch darker and cooler than the paper-white panel. */
+  --bg-chrome: #ebebe9;
+  --bg-surface: #f9f9f8;
+  --border-panel: #dcdcd8;
+  --surface-0: #ffffff;
+  --surface-1: #f1f1f0;
+  --surface-2: #e8e8e7;
+  --surface-3: #dededc;
+  --surface-hover: #e6e6e4;
+  --surface-raised: #fbfbfa;
+  --field-bg: #ffffff;
+  --border-subtle: #e2e2df;
+  --border-default: #cfcfca;
+  --border-strong: #a8a8a1;
+  --text-primary: #1b1b19;
+  --text-secondary: #575752;
+  --text-muted: #75756e;
+  --text-on-accent: #ffffff;
+  --accent: #242422;
+  --accent-hover: #000000;
+  --accent-soft: #e1e1de;
+  --focus: #2869c7;
+  --success: #287a4d;
+  --warning: #9a6200;
+  --danger: #ba3d3d;
+  --danger-strong: #a92e2e;
+  --info: #1769ba;
+  --code-fg: #373732;
+  --code-key: #7547ad;
+  --code-name: #1769a8;
+  --code-string: #527d28;
+  --code-comment: #777770;
+  --icon-default: var(--text-primary);
+  --icon-secondary: var(--text-secondary);
+  --icon-muted: var(--text-muted);
+  --editor-selection: #c9ddff;
+  --editor-line-highlight: rgb(0 0 0 / .04);
+  --editor-gutter: #75756e;
+  --diff-added-bg: #e3f4e8;
+  --diff-added-border: #4d9466;
+  --diff-added-text: #1e5e36;
+  --diff-removed-bg: #fce8e8;
+  --diff-removed-border: #c56464;
+  --diff-removed-text: #8f2b2b;
+  --diff-modified-bg: #fcf2d8;
+  --diff-modified-border: #ae8431;
+  --diff-modified-text: #72510a;
+  --git-conflict: #9b5c1d;
+  --shadow-float: 0 18px 48px rgb(20 20 15 / .16), 0 1px 2px rgb(20 20 15 / .12);
+  --shadow-press: 0 1px 2px rgb(20 20 15 / .12);
+}
+
+/* Density changes geometry only; it never changes hierarchy or meaning. */
+:root[data-density="compact"] { --control: 28px; --row: 27px; --sidebar: 244px; }
+:root[data-density="comfortable"] { --control: 36px; --row: 34px; --sidebar: 272px; }
+
+/* High contrast is a user preference, separate from the color theme. */
+:root[data-contrast="high"] {
+  --border-subtle: var(--border-default);
+  --border-default: var(--border-strong);
+  --border-strong: var(--text-secondary);
+  --text-secondary: var(--text-primary);
+  --text-muted: var(--text-secondary);
+  --focus: #77adff;
+}
+
+:root[data-motion="reduce"] *,
+:root[data-motion="reduce"] *::before,
+:root[data-motion="reduce"] *::after {
+  animation-duration: 1ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-duration: 1ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) *,
+  :root:not([data-motion="full"]) *::before,
+  :root:not([data-motion="full"]) *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+}

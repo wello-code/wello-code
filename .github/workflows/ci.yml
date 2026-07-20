@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    name: typecheck · lint · test · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm --filter @wello-code/design-system lint:tokens
+      - run: pnpm test
+      - run: pnpm build
+
+  e2e:
+    name: packaged-app smoke (renderer hardening)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      # Electron needs a display and a few system libraries on headless Linux.
+      - name: Install Electron runtime libs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 \
+            libcups2 libgtk-3-0 libgbm1 libasound2t64
+      - name: Run packaged-app smoke under xvfb
+        run: xvfb-run -a pnpm --filter @wello-code/desktop test:e2e

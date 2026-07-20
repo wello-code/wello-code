@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+build/
+release/
+.vite/
+*.tsbuildinfo
+
+# Caches
+.turbo/
+coverage/
+.eslintcache
+
+# Test artifacts
+test-results/
+playwright-report/
+out-tsc/
+
+# Secrets / local env (never committed — app secrets live in the OS keychain)
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+*.log
+
+# Internal working material — never publish. Design handoff specs, product briefs
+# and reference screenshots were kept here while the app was being built; they are
+# not part of the product and are archived outside the repository.
+promt/
+UX_AUDIT_*.json
+

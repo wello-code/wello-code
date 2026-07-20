@@ -1,0 +1,40 @@
+{
+  "name": "wello-code",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Wello Code — open-source desktop coding agent powered by your Wello account.",
+  "license": "Apache-2.0",
+  "author": "Wello",
+  "homepage": "https://wello.dev/code",
+  "bugs": {
+    "url": "https://github.com/wello-code/wello-code/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wello-code/wello-code.git"
+  },
+  "type": "module",
+  "packageManager": "pnpm@11.0.9",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "build": "pnpm -r --if-present build",
+    "dev": "pnpm --filter @wello-code/desktop dev"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.10.5",
+    "eslint": "^9.17.0",
+    "globals": "^15.14.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.19.1",
+    "vitest": "^2.1.8"
+  }
+}
