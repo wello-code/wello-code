@@ -1,5 +1,11 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import type { AppSettings, Connection, McpServerSetting, PluginSetting } from "../../shared/ipc-api";
+import type {
+  AppSettings,
+  Connection,
+  McpServerSetting,
+  PluginSetting,
+  UpdateStatus,
+} from "../../shared/ipc-api";
 import { BUNDLED_SKILLS, resolveBundledSkillState } from "../../shared/bundled-skills";
 import {
   HOTKEY_ROWS,
@@ -493,6 +499,40 @@ export function SettingsView({
 
 /* ------------------------------- General --------------------------------- */
 
+/**
+ * Wording and the one available action for each update state. Pure so the copy can
+ * be asserted in tests: a state with no `act` renders no button, which is what keeps
+ * "checking" and "downloading" from being clickable.
+ */
+export function updateRow(status: UpdateStatus): {
+  desc: string;
+  label?: string;
+  act?: "check" | "download" | "install";
+} {
+  switch (status.state) {
+    case "unsupported":
+      return { desc: "Доступны в установленном приложении" };
+    case "checking":
+      return { desc: "Проверяю наличие обновлений…" };
+    case "none":
+      return { desc: "Установлена последняя версия", label: "Проверить снова", act: "check" };
+    case "available":
+      return { desc: `Доступна версия ${status.version}`, label: "Скачать", act: "download" };
+    case "downloading":
+      return { desc: `Загрузка… ${status.percent}%` };
+    case "ready":
+      return {
+        desc: `Версия ${status.version} готова`,
+        label: "Перезапустить и обновить",
+        act: "install",
+      };
+    case "error":
+      return { desc: status.message, label: "Повторить", act: "check" };
+    default:
+      return { desc: "Обновления не проверялись", label: "Проверить", act: "check" };
+  }
+}
+
 /** Общее = notifications + about (name/version with the copy button). */
 function GeneralPage({
   settings,
@@ -504,11 +544,16 @@ function GeneralPage({
   const [version, setVersion] = useState("");
   const [logPath, setLogPath] = useState("");
   const [copied, setCopied] = useState(false);
+  const [update, setUpdate] = useState<UpdateStatus>({ state: "idle" });
   useEffect(() => {
     void window.wello.getAppInfo().then((i) => {
       setVersion(i.version);
       setLogPath(i.logPath);
     });
+    // Pull the current state as well as subscribing: a check may already have run
+    // (or finished) before this page was ever opened.
+    void window.wello.getUpdateStatus().then(setUpdate);
+    return window.wello.onUpdateStatus(setUpdate);
   }, []);
   const copy = (): void => {
     void window.wello.copyText(`Wello Code v${version}`).then(
@@ -561,6 +606,27 @@ function GeneralPage({
                   <Icon name="copy" size={14} />
                 </button>
               </span>
+            }
+          />
+          {/* Updates. Nothing downloads or installs without a click here. */}
+          <Row
+            rowId="about-update"
+            title="Обновления"
+            desc={updateRow(update).desc}
+            control={
+              updateRow(update).act ? (
+                <button
+                  className="button"
+                  onClick={() => {
+                    const act = updateRow(update).act;
+                    if (act === "check") void window.wello.checkForUpdates();
+                    else if (act === "download") void window.wello.downloadUpdate();
+                    else if (act === "install") void window.wello.installUpdate();
+                  }}
+                >
+                  {updateRow(update).label}
+                </button>
+              ) : undefined
             }
           />
           {/* Log file: the one artefact worth attaching to a bug report, so the

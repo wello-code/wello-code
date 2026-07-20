@@ -5,6 +5,7 @@ import type {
   AppSettings,
   Connection,
   StartRunInput,
+  UpdateStatus,
   WelloApi,
   WorkspaceInfo,
 } from "../shared/ipc-api";
@@ -17,6 +18,15 @@ const api: WelloApi = {
   ping: () => ipcRenderer.invoke("app.ping") as Promise<"pong">,
   getAppInfo: () => ipcRenderer.invoke("app.getInfo") as Promise<AppInfo>,
   showLog: () => ipcRenderer.invoke("app.showLog") as Promise<void>,
+  getUpdateStatus: () => ipcRenderer.invoke("update.status") as Promise<UpdateStatus>,
+  checkForUpdates: () => ipcRenderer.invoke("update.check") as Promise<void>,
+  downloadUpdate: () => ipcRenderer.invoke("update.download") as Promise<void>,
+  installUpdate: () => ipcRenderer.invoke("update.install") as Promise<void>,
+  onUpdateStatus: (handler: (status: UpdateStatus) => void) => {
+    const listener = (_e: unknown, status: UpdateStatus): void => handler(status);
+    ipcRenderer.on("update.changed", listener);
+    return () => ipcRenderer.removeListener("update.changed", listener);
+  },
   openExternal: (url) => ipcRenderer.invoke("app.openExternal", url) as Promise<void>,
   setTitleBarOverlay: (opts) => ipcRenderer.invoke("chrome.setOverlay", opts) as Promise<void>,
   onCloseRequested: (handler: () => void) => {

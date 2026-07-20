@@ -118,6 +118,22 @@ async function main() {
     console.warn("skipping icon/metadata stamp: rcedit only runs on Windows");
   }
 
+  // 5. Licences. The Electron runtime drops its OWN LICENSE at the root, which
+  // reads as if it were this app's terms. Ours goes there instead, and everything
+  // we redistribute is collected in one folder rather than buried in node_modules.
+  const repoRoot = resolve(appRoot, "..", "..");
+  const licenseDir = join(distDir, "licenses");
+  await mkdir(licenseDir, { recursive: true });
+  await rename(join(distDir, "LICENSE"), join(licenseDir, "electron.txt"));
+  await rename(join(distDir, "LICENSES.chromium.html"), join(licenseDir, "chromium.html"));
+  await cp(join(repoRoot, "LICENSE"), join(distDir, "LICENSE.txt"));
+  await cp(join(repoRoot, "NOTICE"), join(distDir, "NOTICE.txt"));
+  await cp(
+    join(sdkDir, "LICENSE.md"),
+    join(licenseDir, "claude-agent-sdk.md"),
+  );
+  await cp(join(appRoot, "skills-bundle", "NOTICE"), join(licenseDir, "bundled-skills.txt"));
+
   console.log(`Portable build ready: ${distDir}`);
   console.log("Zip the folder and run 'Wello Code.exe' on the target PC.");
 }

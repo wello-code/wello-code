@@ -16,6 +16,13 @@ import type {
 import { clearApiKey, getApiKey, setApiKey } from "./credentials";
 import { installCrashHandlers, log, logPath } from "./logger";
 import {
+  checkForUpdates,
+  downloadUpdate,
+  initUpdater,
+  installUpdate,
+  updateStatus,
+} from "./updater";
+import {
   fetchAccess,
   generateCommitMessage,
   generateHandoff,
@@ -209,6 +216,11 @@ function registerIpc(): void {
   ipcMain.handle("app.showLog", () => {
     shell.showItemInFolder(logPath());
   });
+
+  ipcMain.handle("update.status", () => updateStatus());
+  ipcMain.handle("update.check", () => checkForUpdates());
+  ipcMain.handle("update.download", () => downloadUpdate());
+  ipcMain.handle("update.install", () => installUpdate());
   ipcMain.handle("app.openExternal", (_e, url: string) => {
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
   });
@@ -1031,6 +1043,15 @@ app.whenReady().then(() => {
 
   registerIpc();
   createWindow();
+
+  initUpdater((status) => mainWindow?.webContents.send("update.changed", status));
+  // Check a little after launch rather than during it: startup is already busy,
+  // and a version check is never urgent. Re-check every six hours so a session
+  // left open for days still learns about a release. `.unref()` keeps the timer
+  // from holding the process alive on quit.
+  setTimeout(() => void checkForUpdates(), 10_000).unref();
+  setInterval(() => void checkForUpdates(), 6 * 60 * 60 * 1000).unref();
+
   void cleanupPastes();
   // Sweep again on a timer so a session left open for days doesn't accumulate
   // pasted images unbounded (each is up to 10 MB). `.unref()` keeps it from

@@ -11,9 +11,15 @@ const workspacePkgs = [
   "@wello-code/design-system",
 ];
 
+// electron-updater must be BUNDLED into the main output, not left external: the
+// packaging script stages only the agent SDK into the app's node_modules (it is the
+// one dependency that cannot be bundled), so an external updater would simply be
+// missing at runtime. It and its deps are pure JS, so rollup handles them.
+const bundledMainDeps = ["electron-updater"];
+
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin({ exclude: workspacePkgs })],
+    plugins: [externalizeDepsPlugin({ exclude: [...workspacePkgs, ...bundledMainDeps] })],
   },
   preload: {
     plugins: [externalizeDepsPlugin({ exclude: workspacePkgs })],

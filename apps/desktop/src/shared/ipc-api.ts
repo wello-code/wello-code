@@ -13,6 +13,21 @@ export interface AppInfo {
   logPath: string;
 }
 
+/**
+ * Where the app is in the update cycle. Nothing downloads or installs on its own,
+ * so every transition past "available" follows an explicit click.
+ * `unsupported` is a dev run: there is no packaged app and no feed to ask.
+ */
+export type UpdateStatus =
+  | { state: "idle" }
+  | { state: "checking" }
+  | { state: "none" }
+  | { state: "available"; version: string }
+  | { state: "downloading"; percent: number }
+  | { state: "ready"; version: string }
+  | { state: "error"; message: string }
+  | { state: "unsupported" };
+
 /** Connection status shown to the renderer. The key itself never crosses the bridge. */
 export interface Connection {
   connected: boolean;
@@ -384,6 +399,16 @@ export interface WelloApi {
   getAppInfo(): Promise<AppInfo>;
   /** Reveal the main-process log in the OS file manager (for attaching to a report). */
   showLog(): Promise<void>;
+  /** Current update state (also pushed via {@link onUpdateStatus}). */
+  getUpdateStatus(): Promise<UpdateStatus>;
+  /** Ask GitHub Releases whether a newer version exists. */
+  checkForUpdates(): Promise<void>;
+  /** Download the pending update. Only meaningful in the "available" state. */
+  downloadUpdate(): Promise<void>;
+  /** Quit and run the downloaded installer. Only meaningful in the "ready" state. */
+  installUpdate(): Promise<void>;
+  /** Subscribe to update-state changes; returns an unsubscribe function. */
+  onUpdateStatus(handler: (status: UpdateStatus) => void): () => void;
   /** Open an https/http URL in the OS browser (for links in rendered markdown). */
   openExternal(url: string): Promise<void>;
   /** Repaint the native window-button overlay to match the app theme (win32). */
