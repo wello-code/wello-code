@@ -61,6 +61,13 @@ async function main() {
   // runtime as `<out/main>/../../skills-bundle`, i.e. resources/app/skills-bundle.
   await cp(join(appRoot, "skills-bundle"), join(stagedApp, "skills-bundle"), { recursive: true });
 
+  // 2c. Runtime brand assets, resolved the same way (`<out/main>/../../resources`).
+  // The window icon lives here. Note the .exe's OWN icon is not set by this script:
+  // renaming the Electron binary leaves its embedded resources untouched, so the
+  // Explorer/taskbar icon only becomes ours once the electron-builder target lands
+  // (build/icon.ico is already prepared for it).
+  await cp(join(appRoot, "resources"), join(stagedApp, "resources"), { recursive: true });
+
   // 3. The only runtime node_modules: the agent SDK and its Windows binary.
   // (sdk.mjs bundles its JS deps; optional platform packages are pnpm-linked as
   // SIBLINGS of the real SDK dir, not under its own node_modules.)

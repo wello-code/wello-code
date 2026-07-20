@@ -897,6 +897,12 @@ function createWindow(): void {
     show: false,
     backgroundColor: "#151515",
     autoHideMenuBar: true,
+    // Window/taskbar icon. A packaged Windows build takes its icon from the .exe
+    // resources instead, so this mainly fixes dev (where the window would otherwise
+    // show Electron's default) and any platform without an embedded icon. Resolved
+    // like the bundled skills: two levels up from out/main, i.e. apps/desktop/resources
+    // in dev and resources/app/resources once packaged.
+    icon: join(import.meta.dirname, "..", "..", "resources", "icon.png"),
     // Frameless-with-native-buttons (Windows): the caption is hidden and the app
     // draws one unified 40px header, while the OS keeps min/max/close as an
     // overlay — so Snap Layouts on hover and edge-resize stay native. Colors

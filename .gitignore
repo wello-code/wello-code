@@ -5,6 +5,10 @@ node_modules/
 dist/
 out/
 build/
+# ...except the desktop app's packaging inputs (icon.ico / icon.png). "build/" is
+# electron-builder's conventional resources directory, so it holds sources here,
+# not output.
+!apps/desktop/build/
 release/
 .vite/
 *.tsbuildinfo
