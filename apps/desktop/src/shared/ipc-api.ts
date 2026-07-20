@@ -9,6 +9,8 @@ export interface AppInfo {
   name: string;
   version: string;
   platform: string;
+  /** Absolute path of the main-process log, surfaced in Settings for bug reports. */
+  logPath: string;
 }
 
 /** Connection status shown to the renderer. The key itself never crosses the bridge. */
@@ -380,6 +382,8 @@ export interface TerminalExit {
 export interface WelloApi {
   ping(): Promise<"pong">;
   getAppInfo(): Promise<AppInfo>;
+  /** Reveal the main-process log in the OS file manager (for attaching to a report). */
+  showLog(): Promise<void>;
   /** Open an https/http URL in the OS browser (for links in rendered markdown). */
   openExternal(url: string): Promise<void>;
   /** Repaint the native window-button overlay to match the app theme (win32). */

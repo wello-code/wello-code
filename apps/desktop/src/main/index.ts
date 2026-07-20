@@ -14,6 +14,7 @@ import type {
   WorkspaceInfo,
 } from "../shared/ipc-api";
 import { clearApiKey, getApiKey, setApiKey } from "./credentials";
+import { installCrashHandlers, log, logPath } from "./logger";
 import {
   fetchAccess,
   generateCommitMessage,
@@ -67,6 +68,17 @@ import { loadWindowBounds, trackWindowBounds } from "./window-state";
 /** electron-vite sets this in dev; its absence means we're running the packaged build. */
 const rendererUrl = process.env.ELECTRON_RENDERER_URL;
 const isDev = Boolean(rendererUrl);
+
+// Before anything else can throw: from here on a crash leaves a trace on disk
+// instead of vanishing with the window.
+installCrashHandlers();
+log.info("app starting", {
+  version: app.getVersion(),
+  platform: process.platform,
+  arch: process.arch,
+  electron: process.versions.electron,
+  dev: isDev,
+});
 
 // One instance only: a second launch would race the same wello-state.json (silent
 // history corruption) and park a second fleet of engine processes. The second
@@ -185,8 +197,18 @@ function registerIpc(): void {
   ipcMain.handle("app.ping", () => "pong" as const);
   ipcMain.handle(
     "app.getInfo",
-    (): AppInfo => ({ name: app.getName(), version: app.getVersion(), platform: process.platform }),
+    (): AppInfo => ({
+      name: app.getName(),
+      version: app.getVersion(),
+      platform: process.platform,
+      logPath: logPath(),
+    }),
   );
+  // Reveal the log in the file manager so a bug report is one click, not a path
+  // the user has to retype. No argument: the path is ours, never the renderer's.
+  ipcMain.handle("app.showLog", () => {
+    shell.showItemInFolder(logPath());
+  });
   ipcMain.handle("app.openExternal", (_e, url: string) => {
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
   });

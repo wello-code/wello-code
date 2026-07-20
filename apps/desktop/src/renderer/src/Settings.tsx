@@ -502,9 +502,13 @@ function GeneralPage({
   persist: (next: AppSettings) => void;
 }) {
   const [version, setVersion] = useState("");
+  const [logPath, setLogPath] = useState("");
   const [copied, setCopied] = useState(false);
   useEffect(() => {
-    void window.wello.getAppInfo().then((i) => setVersion(i.version));
+    void window.wello.getAppInfo().then((i) => {
+      setVersion(i.version);
+      setLogPath(i.logPath);
+    });
   }, []);
   const copy = (): void => {
     void window.wello.copyText(`Wello Code v${version}`).then(
@@ -557,6 +561,28 @@ function GeneralPage({
                   <Icon name="copy" size={14} />
                 </button>
               </span>
+            }
+          />
+          {/* Log file: the one artefact worth attaching to a bug report, so the
+              path is visible and reachable instead of buried in userData. */}
+          <Row
+            rowId="about-log"
+            title="Журнал работы"
+            desc={logPath || "Путь…"}
+            control={
+              <button
+                className="button"
+                onClick={() => {
+                  void window.wello
+                    .showLog()
+                    .catch(() =>
+                      toast({ message: "Не удалось открыть папку", tone: "danger" }),
+                    );
+                }}
+                disabled={!logPath}
+              >
+                Показать файл
+              </button>
             }
           />
         </Card>

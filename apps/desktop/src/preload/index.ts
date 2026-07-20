@@ -16,6 +16,7 @@ import type {
 const api: WelloApi = {
   ping: () => ipcRenderer.invoke("app.ping") as Promise<"pong">,
   getAppInfo: () => ipcRenderer.invoke("app.getInfo") as Promise<AppInfo>,
+  showLog: () => ipcRenderer.invoke("app.showLog") as Promise<void>,
   openExternal: (url) => ipcRenderer.invoke("app.openExternal", url) as Promise<void>,
   setTitleBarOverlay: (opts) => ipcRenderer.invoke("chrome.setOverlay", opts) as Promise<void>,
   onCloseRequested: (handler: () => void) => {
