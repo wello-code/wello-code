@@ -70,6 +70,20 @@ jobs:
           fi
           echo "agent binary present:"; echo "$FOUND"
 
+      # electron-updater on macOS reads latest-mac.yml; without it an update check
+      # just errors out for every mac user. It is generated from the `publish`
+      # config, and we build with --publish never, so whether it survives that is
+      # exactly the kind of thing to assert rather than assume.
+      - name: Verify the update manifest exists
+        run: |
+          OUT=apps/desktop/release/installer
+          if [ ! -f "$OUT/latest-mac.yml" ]; then
+            echo "FAIL: latest-mac.yml was not produced — macOS auto-update would be dead on arrival."
+            ls -la "$OUT"
+            exit 1
+          fi
+          echo "--- latest-mac.yml ---"; cat "$OUT/latest-mac.yml"
+
       # Signing is mandatory on Apple Silicon, so prove it actually happened rather
       # than assuming the config took effect.
       - name: Verify the signature

@@ -68,6 +68,11 @@ mac:
   # library validation rejects the ad-hoc-signed frameworks and the app dies on
   # launch. Off until there is a real Developer ID to sign with.
   hardenedRuntime: false
+  # Default naming yields "Wello Code-0.1.0-arm64.dmg" — spaces and all — which
+  # becomes %20 in every download link we publish. Match the Windows convention
+  # instead. (Set here, not at the top level: the Windows artifact name is already
+  # published under v0.1.0 and must not move.)
+  artifactName: WelloCode-${version}-${arch}.${ext}
   target:
     - target: dmg
       arch: [arm64]
