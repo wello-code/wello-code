@@ -1,70 +1,128 @@
+<div align="center">
+
+<img src="apps/desktop/build/icon.png" width="112" alt="">
+
 # Wello Code
 
-An open-source desktop coding agent: a calm, agent-first workbench for handing a task
-to a model, watching every action it takes, and approving anything that touches your
-machine.
+**Десктопный агент, который пишет код в ваших проектах.**
+Ставит задачу в работу целиком: составляет план, правит файлы, запускает команды.
+Вы видите каждый шаг и подтверждаете всё, что касается вашей машины.
 
-Wello Code signs you in with your **Wello account** and runs against Wello's models, so
-usage counts toward your subscription (with pay-as-you-go beyond it). The desktop app
-talks to the Wello backend only over the public HTTPS API; no private Wello service code
-lives in this repository.
+[Сайт](https://wello.dev) · [О приложении](https://wello.dev/code) · [Тарифы](https://wello.dev/#pricing) · [Скачать](https://github.com/wello-code/wello-code/releases)
 
-> **Status:** first Windows release in preparation. Windows 10+ (64-bit) is the only
-> build today. macOS is planned but not built yet.
+</div>
 
-## What it does
+> **In English:** Wello Code is an open-source desktop coding agent for Windows, powered by a [Wello](https://wello.dev) account. The interface is currently Russian only, so this README is written in Russian.
 
-- **Works in tasks, not prompts.** Describe the job; the agent drafts a plan, walks
-  through it, and hands the result back as a reviewable diff.
-- **Terminal, preview and git in the window.** Run commands, start a dev server, open
-  any site in the built-in browser (with phone and tablet modes), manage branches,
-  commits, stashes and conflicts without a console.
-- **Nothing without asking.** Every file write, command and network call goes through a
-  permission broker and is recorded in an audit timeline. Trust a folder wholesale, or
-  approve one action at a time.
-- **Roll back.** Project state is captured before every turn, so you can return to any
-  step and take both the files and the conversation with you.
-- **GitHub without the CLI.** Publish a project and open a pull request from the UI.
-- **Skills and MCP.** Bundled Agent Skills plus your own, and MCP connectors.
+---
 
-The interface is currently Russian only.
+## Что это
 
-## Architecture
+Обычный чат с моделью заканчивается там, где начинается работа: вы копируете код к себе,
+запускаете, возвращаетесь с ошибкой, копируете снова. Wello Code убирает этот круг. Вы
+описываете задачу, агент работает прямо в папке вашего проекта, а вы смотрите на его шаги
+и решаете, что ему разрешить.
 
-- **Electron + React + TypeScript (strict) + Vite**, pnpm workspace.
-- Hardened renderer: `sandbox`, `contextIsolation`, no `nodeIntegration`, strict CSP. A
-  small typed preload API is the only bridge.
-- Privileged work (files, shell, git, agent) lives in the main process behind
-  Zod-validated contracts.
-- The agent engine sits behind a typed `AgentProvider`; a deterministic
-  `MockAgentProvider` runs the whole UX in tests with no network and no key.
+Приложение работает на вашем аккаунте [Wello](https://wello.dev): расход считается по той же
+подписке, что и веб-чат, отдельно платить не нужно.
 
-## Development
+## Что умеет
+
+**Работает задачами, а не подсказками.** Опишите, что нужно сделать. Агент составит план,
+пройдёт по шагам и покажет результат готовым диффом, который можно просмотреть перед тем,
+как принять.
+
+**Терминал внутри.** Запускает команды, ставит зависимости, поднимает dev-сервер. Вкладки
+терминала и вывод прямо в окне, без переключения на консоль.
+
+**Превью сайта рядом.** Встроенный браузер открывает ваш dev-сервер и любые другие сайты,
+с режимами телефона и планшета. Агент видит страницу и правит вёрстку по тому, что на ней.
+
+**Git и GitHub без консоли.** Ветки, коммиты, стэш, разрешение конфликтов. Проект
+публикуется на GitHub и создаёт pull request в пару кликов, без `git push` руками.
+
+**Можно откатиться.** Перед каждым ходом снимается состояние проекта. Вернуться к любому
+шагу можно вместе с файлами и перепиской, если агент увёл работу не туда.
+
+**Ничего без спроса.** Запись файлов, команды и обращения в сеть проходят через
+подтверждение. Папке можно доверять целиком или разрешать по одному действию.
+
+**Скиллы и MCP.** Встроенный набор скиллов, свои собственные и подключение MCP-серверов.
+
+## Установка
+
+Скачайте инсталлятор со страницы [релизов](https://github.com/wello-code/wello-code/releases)
+и запустите его.
+
+> **Windows покажет предупреждение.** Приложение пока не подписано сертификатом издателя,
+> поэтому при первом запуске появится синий экран «Windows защитила ваш компьютер». Это не
+> значит, что с файлом что-то не так: так система реагирует на любую программу без платной
+> подписи. Нажмите **«Подробнее»**, затем **«Выполнить в любом случае»**.
+
+Обновления приходят автоматически и скачиваются частями: приложение сравнивает старую и
+новую сборку и тянет только изменившиеся куски, поэтому обычное обновление весит пару
+мегабайт, а не всю сборку целиком. Ничего не устанавливается без вашего подтверждения.
+
+## Что нужно
+
+- **Windows 10 или новее**, 64 бита. Версия для macOS готовится.
+- **Аккаунт [Wello](https://wello.dev)** с подпиской Pro или Max. Без подписки приложение
+  работает с баланса по факту использования.
+- Около 550 МБ на диске после установки.
+
+## Как начать
+
+1. Установите приложение и запустите его.
+2. Нажмите **«Войти через браузер»**. Откроется страница Wello, где вы подтвердите вход.
+   Отдельный ключ создавать не нужно.
+3. Откройте папку проекта и опишите задачу.
+
+## Разработка
+
+Нужны Node 20 или новее (в `.nvmrc` зафиксирован 22) и pnpm 11.
 
 ```bash
 pnpm install
-pnpm dev          # launch the desktop app
+pnpm dev          # запустить приложение
 pnpm typecheck
 pnpm lint
 pnpm test
 ```
 
-Requires Node >= 20 and pnpm 11.
-
-To produce a portable Windows build:
+Собрать установщик для Windows:
 
 ```bash
-pnpm --filter @wello-code/desktop build
-node apps/desktop/scripts/package-win.mjs
+pnpm --filter @wello-code/desktop dist:win
 ```
 
-## License
+Готовый инсталлятор появится в `apps/desktop/release/installer/`.
 
-Apache License 2.0. See [LICENSE](LICENSE).
+## Как устроено
 
-The agent engine, [`@anthropic-ai/claude-agent-sdk`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk),
-is a **proprietary** dependency of Anthropic PBC and is not covered by this project's
-license; it is installed from npm and its use is subject to
-[Anthropic's terms](https://code.claude.com/docs/en/legal-and-compliance). Bundled
-third-party Agent Skills keep their own licenses. See [NOTICE](NOTICE) for the full
-attribution list.
+**Electron + React + TypeScript + Vite**, монорепозиторий на pnpm.
+
+Рендерер изолирован по-настоящему: `sandbox`, `contextIsolation`, без `nodeIntegration`,
+со строгим CSP. Единственный мост наружу — небольшой типизированный preload-API. Всё
+привилегированное (файлы, шелл, git, агент) живёт в main-процессе за контрактами, которые
+валидируются через Zod.
+
+Движок агента спрятан за типизированным `AgentProvider`. Детерминированный
+`MockAgentProvider` прогоняет весь пользовательский сценарий в тестах без сети и без ключа.
+
+## Лицензия
+
+[Apache License 2.0](LICENSE).
+
+Движок агента — [`@anthropic-ai/claude-agent-sdk`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) —
+**проприетарная** зависимость Anthropic PBC и лицензией этого проекта **не покрывается**. Он
+ставится из npm, его использование регулируется
+[условиями Anthropic](https://code.claude.com/docs/en/legal-and-compliance). Встроенные
+скиллы сохраняют свои лицензии. Полный список — в [NOTICE](NOTICE).
+
+## Поддержка
+
+Вопросы и проблемы: [@wellosupport](https://t.me/wellosupport) в Telegram или
+[обращение в личном кабинете](https://wello.dev/settings/support).
+
+Нашли баг в приложении? Приложите файл журнала — путь к нему показан в
+**Настройки → О приложении → Журнал работы**.
