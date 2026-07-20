@@ -31,7 +31,21 @@ jobs:
       # signature carries no identity, which is all Apple Silicon requires in order
       # to execute the code at all.
       - name: Package
+        # Verbose on purpose: the job logs are the only window into this build for
+        # anyone without a Mac, and a bare "exit code 1" costs a whole round trip.
+        env:
+          DEBUG: electron-builder
         run: pnpm --filter @wello-code/desktop exec electron-builder --mac
+
+      # Runs even when packaging failed, so the next question is answerable from
+      # the log instead of another run: what actually landed on disk?
+      - name: Show what was produced
+        if: always()
+        run: |
+          echo "--- release/installer ---"
+          ls -la apps/desktop/release/installer 2>/dev/null || echo "(no output directory)"
+          echo "--- .app bundles ---"
+          find apps/desktop/release -maxdepth 3 -name "*.app" 2>/dev/null || true
 
       # The agent binary arrives via an optionalDependency that only installs on
       # arm64 macOS. If that ever stops resolving, the app still builds and still

@@ -28,6 +28,22 @@ directories:
   buildResources: build
   output: release/installer
 
+# An allowlist, mirroring exactly what package-win.mjs stages — which is the set we
+# know runs. Without it electron-builder packs the whole app directory, and in a
+# pnpm workspace that means walking a forest of symlinks into every devDependency
+# (Playwright, Vite, electron-builder itself). With asar off that is a great deal
+# of copying for a payload that has no business shipping.
+#
+# The renderer's own dependencies (React, highlight.js, react-markdown) are absent
+# on purpose: electron-vite already bundled them into out/. The agent SDK is the
+# one dependency that cannot be bundled, because it spawns a binary off disk.
+files:
+  - out/**/*
+  - skills-bundle/**/*
+  - resources/**/*
+  - package.json
+  - node_modules/@anthropic-ai/**/*
+
 win:
   icon: build/icon.ico
   target:
