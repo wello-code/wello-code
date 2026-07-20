@@ -1,0 +1,51 @@
+# Installer packaging. Deliberately runs over an ALREADY-STAGED app directory
+# (`electron-builder --prepackaged release/WelloCode-win-x64`) instead of letting
+# electron-builder assemble the app itself.
+#
+# Why: the agent SDK's Windows binary is an optional platform package that pnpm
+# links as a SIBLING in the store rather than under the SDK's own node_modules, so
+# electron-builder's dependency walk does not find it and would ship a build that
+# cannot start the engine. scripts/package-win.mjs resolves it explicitly (and
+# stages only what is actually needed: out/, skills-bundle/, resources/ and the
+# SDK). That script also stamps the .exe icon and version strings via rcedit,
+# which --prepackaged skips.
+#
+# asar is intentionally absent: the SDK spawns claude.exe straight off disk, and a
+# packed archive means either asarUnpack gymnastics or a binary that cannot be
+# executed. The tree stays loose, exactly as the portable build has always shipped.
+
+appId: dev.wello.code
+productName: Wello Code
+copyright: Copyright 2026 Wello. Apache License 2.0.
+
+directories:
+  buildResources: build
+  output: release/installer
+
+win:
+  icon: build/icon.ico
+  target:
+    - nsis
+
+nsis:
+  # A wizard, not a one-click surprise install: people downloading an unsigned
+  # binary have just clicked through a SmartScreen warning, so hiding the
+  # destination folder from them is the wrong instinct.
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Wello Code
+  artifactName: WelloCode-Setup-${version}.${ext}
+  # Leave the user's projects and settings alone when uninstalling; wello-state.json
+  # holds their whole task history.
+  deleteAppDataOnUninstall: false
+
+# Feeds the auto-updater: publishing to GitHub Releases produces latest.yml plus a
+# .blockmap next to the installer, which is what lets electron-updater download only
+# the changed blocks (our own code is ~2 MB of a ~190 MB artifact).
+publish:
+  provider: github
+  owner: wello-code
+  repo: wello-code

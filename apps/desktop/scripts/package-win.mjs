@@ -91,8 +91,32 @@ async function main() {
     });
   }
 
-  // 4. Name the executable.
-  await rename(join(distDir, "electron.exe"), join(distDir, "Wello Code.exe"));
+  // 4. Name the executable, then stamp our identity into it. Renaming alone leaves
+  // Electron's own icon and version strings embedded in the binary, so Explorer,
+  // the taskbar and the file's Properties tab all still said "Electron".
+  const exePath = join(distDir, "Wello Code.exe");
+  await rename(join(distDir, "electron.exe"), exePath);
+
+  if (process.platform === "win32") {
+    // CommonJS exporting `{ rcedit }` (not a bare function, and no default), so
+    // reach it through require and destructure rather than `import rcedit from`.
+    const { rcedit } = require_("rcedit");
+    await rcedit(exePath, {
+      icon: join(appRoot, "build", "icon.ico"),
+      "version-string": {
+        ProductName: "Wello Code",
+        FileDescription: "Wello Code",
+        CompanyName: "Wello",
+        LegalCopyright: "Copyright 2026 Wello. Apache License 2.0.",
+        OriginalFilename: "Wello Code.exe",
+      },
+      // Windows wants a 4-part file version; the product version stays semver.
+      "file-version": `${desktopPkg.version}.0`,
+      "product-version": desktopPkg.version,
+    });
+  } else {
+    console.warn("skipping icon/metadata stamp: rcedit only runs on Windows");
+  }
 
   console.log(`Portable build ready: ${distDir}`);
   console.log("Zip the folder and run 'Wello Code.exe' on the target PC.");

@@ -3,4 +3,7 @@ packages:
   - "packages/*"
 allowBuilds:
   electron: true
+  # Squirrel.Windows installer builder, pulled in by electron-builder. We ship the
+  # NSIS target, so its postinstall never needs to run.
+  electron-winstaller: false
   esbuild: true
