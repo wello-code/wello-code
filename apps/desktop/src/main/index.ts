@@ -937,15 +937,30 @@ function createWindow(): void {
     // like the bundled skills: two levels up from out/main, i.e. apps/desktop/resources
     // in dev and resources/app/resources once packaged.
     icon: join(import.meta.dirname, "..", "..", "resources", "icon.png"),
-    // Frameless-with-native-buttons (Windows): the caption is hidden and the app
-    // draws one unified 40px header, while the OS keeps min/max/close as an
-    // overlay — so Snap Layouts on hover and edge-resize stay native. Colors
-    // start at the dark theme and are re-synced from the renderer on theme
-    // change (chrome.setOverlay). Other platforms keep their native frame.
+    // Frameless-with-native-buttons: the caption is hidden and the app draws one
+    // unified 40px header, while the OS keeps its own window controls on top, so
+    // Snap Layouts (Windows) and edge-resize stay native.
+    //
+    // The two platforms put those controls on OPPOSITE sides. Windows overlays
+    // min/max/close on the right and reports the reserved area to CSS via
+    // env(titlebar-area-*); its colours start dark and are re-synced from the
+    // renderer on theme change (chrome.setOverlay). macOS puts the three traffic
+    // lights top LEFT, which is where our sidebar/search/navigation cluster sits —
+    // so we centre them in the 40px bar here, and the renderer reserves the width
+    // (see [data-platform="mac"] .titlebar). macOS has no window-controls-overlay
+    // API, so env(titlebar-area-height) is undefined there and the 40px fallback
+    // already baked into those rules is the correct value.
     ...(process.platform === "win32"
       ? {
           titleBarStyle: "hidden" as const,
           titleBarOverlay: { color: "#202020", symbolColor: "#b4b4b4", height: 40 },
+        }
+      : {}),
+    ...(process.platform === "darwin"
+      ? {
+          titleBarStyle: "hidden" as const,
+          // 12px buttons centred in a 40px bar: (40 - 12) / 2 = 14.
+          trafficLightPosition: { x: 13, y: 14 },
         }
       : {}),
     webPreferences: {

@@ -484,6 +484,15 @@ body.is-col-resizing {
 .titlebar button {
   -webkit-app-region: no-drag;
 }
+/* macOS renders its three traffic lights INSIDE this bar, at the top left —
+   exactly where the sidebar/search/navigation cluster sits. Reserve the group's
+   width (13px inset + 3 x 12px buttons + 2 x 8px gaps = 65px) plus breathing
+   room; main.ts centres them vertically via trafficLightPosition. Windows and
+   Linux put their controls on the right, where the overlay reserves its own
+   space, so nothing is needed there. */
+:root[data-platform="mac"] .titlebar {
+  padding-left: 78px;
+}
 
 /* --- Sidebar --- */
 .sidebar {

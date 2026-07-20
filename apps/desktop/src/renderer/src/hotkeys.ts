@@ -40,7 +40,12 @@ export const HOTKEYS: Hotkey[] = [
   },
 ];
 
-const IS_MAC =
+/**
+ * Exported because window chrome needs it too, not just keyboard shortcuts: macOS
+ * draws its traffic lights inside our frameless title bar and the layout has to
+ * make room. One detector, so the two can never disagree.
+ */
+export const IS_MAC =
   typeof navigator !== "undefined" && /Mac|iP(hone|ad|od)/.test(navigator.platform ?? "");
 
 /** The platform's command-modifier name for cheatsheets: ⌘ on macOS, Ctrl elsewhere. */
