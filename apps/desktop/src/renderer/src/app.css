@@ -4007,6 +4007,8 @@ body.is-row-resizing {
   display: none;
 }
 /* Soft edge fades — a hint that the strip continues past the clip. */
+/* token-lint-ignore-start: mask gradients — #000 here is the alpha channel ("keep"),
+   not a colour, and must stay opaque in every theme. */
 .terminal__tabs.is-fade-l {
   mask-image: linear-gradient(to right, transparent, #000 18px);
 }
@@ -4022,6 +4024,7 @@ body.is-row-resizing {
     transparent
   );
 }
+/* token-lint-ignore-end */
 .terminal__tab {
   display: inline-flex;
   align-items: center;
@@ -4158,6 +4161,8 @@ body.is-row-resizing {
   text-decoration: underline;
 }
 /* ANSI palette, tuned to read on the dark card. Slots 0–7 normal, 8–15 bright. */
+/* token-lint-ignore-start: the 16 ANSI slots ARE the palette this block defines —
+   programs emit "colour 1", so these are a terminal spec, not brand tokens. */
 .terminal {
   --ansi-0: #6b6b6b;
   --ansi-1: #e26d5c;
@@ -4195,6 +4200,7 @@ body.is-row-resizing {
   --ansi-14: #1f8f8f;
   --ansi-15: #333333;
 }
+/* token-lint-ignore-end */
 .tfg-0 { color: var(--ansi-0); }
 .tfg-1 { color: var(--ansi-1); }
 .tfg-2 { color: var(--ansi-2); }
@@ -4392,7 +4398,7 @@ body.is-row-resizing {
   height: 13px;
   border-radius: 999px;
   border: 2px solid var(--bg-surface);
-  color: #fff;
+  color: #fff; /* token-lint-ignore: glyph sits on the success/danger fill, which is the same colour in both themes */
 }
 .agents__avatar-badge svg {
   display: block;
@@ -5001,6 +5007,7 @@ body.is-row-resizing {
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-subtle);
 }
+/* token-lint-ignore-start: swatches must SHOW each theme, so they must not follow the active one */
 .themecard--dark .themecard__preview {
   background: #1a1a1a;
 }
@@ -5010,6 +5017,7 @@ body.is-row-resizing {
 .themecard--light .themecard__preview {
   background: #f1f1f0;
 }
+/* token-lint-ignore-end */
 .themecard__chip {
   width: 22px;
   height: 6px;
@@ -5293,7 +5301,7 @@ body.is-row-resizing {
   border: none;
   border-radius: 999px;
   background: rgb(255 255 255 / 0.1);
-  color: #fff;
+  color: #fff; /* token-lint-ignore: the lightbox is a dark overlay in both themes */
   transition: background var(--motion-hover);
 }
 .lightbox__btn:hover {
@@ -5318,7 +5326,7 @@ body.is-row-resizing {
   padding: 3px 10px;
   border-radius: 999px;
   background: rgb(0 0 0 / 0.55);
-  color: #fff;
+  color: #fff; /* token-lint-ignore: the lightbox is a dark overlay in both themes */
   font-size: 11.5px;
   font-variant-numeric: tabular-nums;
 }
@@ -5980,5 +5988,5 @@ body.is-row-resizing {
 /* Settings: hotkey cheatsheet. */
 /* Settings: "System" theme swatch. */
 .themecard--system .themecard__preview {
-  background: linear-gradient(105deg, #191919 0 50%, #f3f3f2 50% 100%);
+  background: linear-gradient(105deg, #191919 0 50%, #f3f3f2 50% 100%); /* token-lint-ignore: shows both themes side by side */
 }
