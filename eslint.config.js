@@ -32,4 +32,13 @@ export default tseslint.config(
       globals: { ...globals.node },
     },
   },
+  {
+    // Node scripts that drive a browser: the bodies passed to page.evaluate() are
+    // serialised and run in the page, so they legitimately reference document and
+    // friends even though the file itself is Node.
+    files: ["apps/desktop/scripts/mac-shot.mjs"],
+    languageOptions: {
+      globals: { ...globals.node, ...globals.browser },
+    },
+  },
 );

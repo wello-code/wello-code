@@ -10,6 +10,7 @@
  *
  * Usage: node scripts/mac-shot.mjs <path-to-.app> <output.png>
  */
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,6 +25,15 @@ if (!appPath || !outPath) {
 
 // Inside a bundle the real binary is Contents/MacOS/<name without .app>.
 const executablePath = join(appPath, "Contents", "MacOS", basename(appPath).replace(/\.app$/, ""));
+
+// Say WHERE we looked from. A relative path plus an unexpected cwd is the whole
+// reason the first run of this failed, and "exit code 1" said none of it.
+if (!existsSync(executablePath)) {
+  console.error(`no executable at: ${executablePath}`);
+  console.error(`cwd: ${process.cwd()}`);
+  console.error(`(the .app path is resolved relative to cwd — pnpm --filter exec runs inside the package)`);
+  process.exit(1);
+}
 
 const profile = await mkdtemp(join(tmpdir(), "wello-shot-"));
 const app = await electron.launch({

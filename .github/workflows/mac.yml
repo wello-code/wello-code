@@ -83,9 +83,12 @@ jobs:
       # fail an otherwise good build.
       - name: Photograph the title bar
         continue-on-error: true
+        # Paths are relative to apps/desktop, NOT the repo root: `pnpm --filter exec`
+        # runs inside the package directory. Passing repo-root paths here silently
+        # looked for apps/desktop/apps/desktop/... and the step died on a missing file.
         run: |
           pnpm --filter @wello-code/desktop exec node scripts/mac-shot.mjs \
-            "apps/desktop/release/installer/mac-arm64/Wello Code.app" \
+            "release/installer/mac-arm64/Wello Code.app" \
             "$RUNNER_TEMP/mac-titlebar.png"
 
       - name: Upload screenshot
