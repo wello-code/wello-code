@@ -443,6 +443,7 @@ function initialMode(): TaskMode {
 // back to Sonnet 5 via initialModel()'s validation.
 const MODELS: { id: string; label: string; hint: string }[] = [
   { id: "claude-sonnet-5", label: "Sonnet 5", hint: "Баланс скорости и качества" },
+  { id: "claude-opus-5", label: "Opus 5", hint: "Новейший Opus, максимум качества" },
   { id: "claude-opus-4-8", label: "Opus 4.8", hint: "Сложные задачи, максимум качества" },
   { id: "claude-fable-5", label: "Fable 5", hint: "Флагман с размышлениями" },
 ];

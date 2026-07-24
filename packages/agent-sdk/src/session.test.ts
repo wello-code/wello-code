@@ -47,6 +47,7 @@ describe("githubSystemAppend (the anti-'gh auth login' steering)", () => {
 describe("engineModelId", () => {
   it("rides the [1m] variant for 1M-class catalog models", () => {
     expect(engineModelId("claude-sonnet-5")).toBe("claude-sonnet-5[1m]");
+    expect(engineModelId("claude-opus-5")).toBe("claude-opus-5[1m]");
     expect(engineModelId("claude-opus-4-8")).toBe("claude-opus-4-8[1m]");
     expect(engineModelId("claude-fable-5")).toBe("claude-fable-5[1m]");
   });
