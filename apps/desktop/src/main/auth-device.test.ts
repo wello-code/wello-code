@@ -53,6 +53,30 @@ describe("startBrowserSignIn", () => {
     await expect(s.key).rejects.toBeInstanceOf(AuthCancelledError);
   });
 
+  it("waits as long as the server's expires_in, not a shorter fixed window", async () => {
+    // Regression: the app used a hard 10-minute deadline while the gateway had
+    // raised its session TTL to 30, so a first-time user still on the signup email
+    // was told the request had expired while the session was very much alive.
+    const { impl } = stubFetch([() => json(200, { status: "pending" })], {
+      device_code: "d".repeat(64),
+      user_code: "u".repeat(48),
+      verify_url: "https://wello.dev/code-auth?code=" + "u".repeat(48),
+      expires_in: 1800,
+      interval: 1,
+    });
+    const started = Date.now();
+    const s = await startBrowserSignIn({ fetchImpl: impl });
+    // Not asserted by waiting 30 minutes: prove it did NOT reject early, then stop.
+    const settled = await Promise.race([
+      s.key.then(() => "resolved").catch((e) => `rejected:${(e as Error).name}`),
+      new Promise((r) => setTimeout(() => r("still-waiting"), 150)),
+    ]);
+    expect(settled).toBe("still-waiting");
+    expect(Date.now() - started).toBeLessThan(10 * 60_000);
+    s.cancel();
+    await expect(s.key).rejects.toBeInstanceOf(AuthCancelledError);
+  });
+
   it("keeps the device_code out of the URL the browser opens", async () => {
     const { impl } = stubFetch([() => json(200, { status: "pending" })]);
     const s = await startBrowserSignIn({ fetchImpl: impl, timeoutMs: 50 });

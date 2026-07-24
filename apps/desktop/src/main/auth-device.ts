@@ -21,8 +21,12 @@
 const BASE_URL = "https://api.wello.dev";
 /** Fallback pacing if the server does not advertise an interval. */
 const DEFAULT_INTERVAL_MS = 2000;
-/** Give up well before a human would; the server session expires around 10 min. */
-const DEFAULT_TIMEOUT_MS = 10 * 60_000;
+/**
+ * Fallback lifetime when the server does not advertise one. The wait is normally
+ * driven by the server's own `expires_in` (see below) — this only covers an old
+ * or trimmed response, and matches the gateway's session TTL.
+ */
+const DEFAULT_TIMEOUT_MS = 30 * 60_000;
 
 export class AuthCancelledError extends Error {
   constructor() {
@@ -57,6 +61,7 @@ interface StartResponse {
   user_code?: unknown;
   verify_url?: unknown;
   interval?: unknown;
+  expires_in?: unknown;
 }
 
 const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
@@ -104,8 +109,20 @@ export async function startBrowserSignIn(opts?: {
       ? Math.min(Math.max(body.interval, 1), 30) * 1000
       : DEFAULT_INTERVAL_MS;
 
+  // Wait as long as the SERVER keeps the session alive. This used to be a fixed
+  // ten minutes while the gateway had already raised its TTL to thirty — and it
+  // raised it for exactly this cohort: a first-time user signs up, waits on a
+  // 6-digit email (spam folder included) or resets a password in the middle of
+  // the flow. The app gave up at ten minutes and showed "истёк" while the session
+  // was still good for another twenty. Clamped so a garbled value cannot make the
+  // app wait forever (or not at all).
+  const serverTtlMs =
+    typeof body.expires_in === "number" && body.expires_in > 0
+      ? Math.min(Math.max(body.expires_in, 60), 60 * 60) * 1000
+      : undefined;
+
   const controller = new AbortController();
-  const deadline = Date.now() + (opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const deadline = Date.now() + (opts?.timeoutMs ?? serverTtlMs ?? DEFAULT_TIMEOUT_MS);
 
   const key = (async (): Promise<string> => {
     for (;;) {
