@@ -1,0 +1,84 @@
+name: Release
+
+# One-command release. Push a tag `vX.Y.Z` (or run this by hand) and CI builds
+# BOTH platforms and publishes the GitHub Release the auto-updater reads — nothing
+# is built on anyone's laptop. The release is assembled as a DRAFT (electron-builder's
+# default) and only flipped public by the final job, so a half-uploaded release is
+# never briefly live and no mac-less/win-less window exists for the updater to trip on.
+#
+# Publishing uses the built-in GITHUB_TOKEN (no secret to manage). Nothing here is
+# signed with a paid certificate: Windows ships unsigned, macOS ad-hoc (see
+# electron-builder.yml) — the same as every release so far.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+# The default token is read-only; creating the release and uploading assets needs write.
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: build · publish (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      # No `version:` — package.json pins packageManager (pnpm@11.x); action-setup
+      # refuses when the version is declared in both places.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Stages the app the way the local `dist:win` does: package-win.mjs resolves the
+      # SDK's sibling win32 binary (pnpm links it outside the SDK's own node_modules)
+      # and stamps the exe, then electron-builder packs the NSIS installer over the
+      # already-staged tree and uploads it to the draft release.
+      - run: pnpm --filter @wello-code/desktop package:win
+      - name: Publish Windows installer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm --filter @wello-code/desktop exec electron-builder --win --prepackaged release/WelloCode-win-x64 --publish always
+
+  macos:
+    name: build · publish (macOS arm64)
+    runs-on: macos-latest
+    # Sequential, not parallel: one job creates the draft release and the other
+    # appends to it. Two jobs racing to create the same release is the one way this
+    # publish step can flake, and a release is infrequent enough that the extra
+    # wall-clock does not matter.
+    needs: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @wello-code/desktop build
+      # electron-builder itself packs the .app (renaming a bundle is surgery — see
+      # electron-builder.yml) and uploads the dmg/zip/blockmap + latest-mac.yml.
+      - name: Publish macOS build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm --filter @wello-code/desktop exec electron-builder --mac --publish always
+
+  finalize:
+    name: make the release public
+    runs-on: ubuntu-latest
+    needs: macos
+    steps:
+      - uses: actions/checkout@v4
+      # Both builds uploaded to a DRAFT; electron-updater ignores drafts, so flip it
+      # public now that every asset is in place. The tag is derived from the version
+      # so this works whether triggered by a pushed tag or by hand.
+      - name: Publish the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v$(node -p "require('./package.json').version")"
+          echo "Publishing release $TAG"
+          gh release edit "$TAG" --draft=false --latest --repo "${GITHUB_REPOSITORY}"

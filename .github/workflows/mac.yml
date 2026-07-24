@@ -1,11 +1,12 @@
 name: macOS build
 
-# Not on every push: a macOS run is slow, and the build is only interesting when
-# we are about to ship one. Trigger it by hand, or automatically on a release tag.
+# Not on every push: a macOS run is slow. This is the deep VERIFY of a mac build
+# (agent binary present, signature, update manifest, title-bar screenshot) — run it
+# by hand before a release when you want those checks. The release itself (build +
+# publish, both platforms) is release.yml, triggered on the `v*` tag; this stays
+# manual so a tag does not build macOS twice.
 on:
   workflow_dispatch:
-  push:
-    tags: ["v*"]
 
 jobs:
   build:
