@@ -268,16 +268,41 @@ export function engineModelId(model: string): string {
 }
 
 /**
- * UI effort → engine effort. «Ультра» is not a real API level: the engine runs at
- * xhigh (the ultracode recipe — max is prone to overthinking in agentic loops)
- * and the native ultracode settings switch on. The explicit xhigh stays as a
- * belt-and-suspenders floor should the flag-settings layer ever fail to apply.
+ * Explicit thinking-token budgets for the top effort positions. On xhigh/max (and
+ * the xhigh-based «Ультра») the engine's raw `effort` param drives Opus into a
+ * NON-TERMINATING thinking phase whenever a large skill lands in context — the
+ * default design skill is ~1.2k lines, and the model reasons over it without ever
+ * stopping. The Wello upstream never streams thinking, so the UI just sat on
+ * «Думает…» for 10+ minutes (owner-reported 2026-07-24; reproduced live: max/xhigh
+ * spiral, high and below terminate on their own in ~1 min). `effort` guides adaptive
+ * thinking depth and OVERRIDES `maxThinkingTokens`, so the only way to bound these
+ * levels is to drop `effort` and hand the engine an explicit `thinking` budget — a
+ * hard ceiling the model must stop at, so the turn always terminates. The budgets
+ * stay generous (deep reasoning is the whole point of the top of the scale) but
+ * finite. low/medium/high reason and stop by themselves, so they keep the native
+ * `effort` param untouched — the common path (high is the default) is unchanged.
+ */
+const TOP_THINKING_BUDGET: Partial<Record<WelloEffort, number>> = {
+  xhigh: 32_000,
+  max: 48_000,
+  ultra: 48_000,
+};
+
+/**
+ * UI effort → what the engine gets. low/medium/high pass through as the native
+ * `effort` param (fast, well-tuned, and self-terminating). xhigh/max/«Ультра» run
+ * on a bounded `thinking` budget INSTEAD of `effort` — see TOP_THINKING_BUDGET for
+ * why: raw high-tier effort overthinks skill-heavy turns forever. «Ультра» also
+ * flips the native ultracode orchestration flag on (its budget matches max).
  */
 export function resolveEffort(effort?: WelloEffort): {
   engineEffort?: EffortLevel;
+  thinkingBudget?: number;
   ultra: boolean;
 } {
-  if (effort === "ultra") return { engineEffort: "xhigh", ultra: true };
+  if (effort === "ultra") return { thinkingBudget: TOP_THINKING_BUDGET.ultra, ultra: true };
+  const budget = effort ? TOP_THINKING_BUDGET[effort] : undefined;
+  if (budget) return { thinkingBudget: budget, ultra: false };
   return { engineEffort: effort, ultra: false };
 }
 
@@ -867,7 +892,7 @@ export class SdkAgentSession {
 
     const permissionMode = sdkPermissionMode(req.mode);
     const model = engineModelId(req.model ?? "claude-sonnet-5");
-    const { engineEffort, ultra } = resolveEffort(req.effort);
+    const { engineEffort, thinkingBudget, ultra } = resolveEffort(req.effort);
     // Self-injected project instructions (AGENTS.md): the engine only loads
     // CLAUDE.md natively, so the runtime reads AGENTS.md and appends it here.
     const baseAppend = `${SYSTEM_APPEND}\n\n${githubSystemAppend(req.github, Boolean(req.gitEnv))}`;
@@ -878,7 +903,13 @@ export class SdkAgentSession {
     const options: Options = {
       cwd: req.workspacePath,
       model,
+      // Top of the scale rides a bounded `thinking` budget instead of raw
+      // `effort` (which overthinks skill-heavy turns forever) — see resolveEffort.
+      // Exactly one of these is set; they are mutually exclusive.
       ...(engineEffort ? { effort: engineEffort } : {}),
+      ...(thinkingBudget
+        ? { thinking: { type: "enabled" as const, budgetTokens: thinkingBudget } }
+        : {}),
       env: this.buildEnv(model, req.gitEnv),
       abortController: abort,
       includePartialMessages: true,

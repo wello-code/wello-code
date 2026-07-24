@@ -58,14 +58,35 @@ describe("engineModelId", () => {
 });
 
 describe("resolveEffort", () => {
-  it("passes the engine's own levels through untouched", () => {
+  it("passes low/medium/high through as the native effort param (no thinking cap)", () => {
     expect(resolveEffort("low")).toEqual({ engineEffort: "low", ultra: false });
-    expect(resolveEffort("max")).toEqual({ engineEffort: "max", ultra: false });
+    expect(resolveEffort("medium")).toEqual({ engineEffort: "medium", ultra: false });
+    expect(resolveEffort("high")).toEqual({ engineEffort: "high", ultra: false });
     expect(resolveEffort(undefined)).toEqual({ engineEffort: undefined, ultra: false });
   });
 
-  it("maps «Ультра» to xhigh plus the orchestration flag (the ultracode recipe)", () => {
-    expect(resolveEffort("ultra")).toEqual({ engineEffort: "xhigh", ultra: true });
+  it("bounds xhigh/max with a thinking budget instead of raw effort (skill-hang fix)", () => {
+    // At raw xhigh/max effort a large skill in context sends Opus into a
+    // non-terminating think — see resolveEffort. These levels drop `effort` and
+    // ride a bounded `thinking` budget, so no `engineEffort` comes back.
+    const xhigh = resolveEffort("xhigh");
+    expect(xhigh.engineEffort).toBeUndefined();
+    expect(xhigh.thinkingBudget).toBeGreaterThan(0);
+    expect(xhigh.ultra).toBe(false);
+
+    const max = resolveEffort("max");
+    expect(max.engineEffort).toBeUndefined();
+    expect(max.thinkingBudget).toBeGreaterThan(0);
+    // max reasons at least as deep as xhigh, still finite.
+    expect(max.thinkingBudget!).toBeGreaterThanOrEqual(xhigh.thinkingBudget!);
+    expect(max.ultra).toBe(false);
+  });
+
+  it("runs «Ультра» on a bounded thinking budget plus the orchestration flag", () => {
+    const ultra = resolveEffort("ultra");
+    expect(ultra.engineEffort).toBeUndefined();
+    expect(ultra.thinkingBudget).toBeGreaterThan(0);
+    expect(ultra.ultra).toBe(true);
   });
 });
 
