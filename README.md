@@ -12,7 +12,7 @@
 
 </div>
 
-> **In English:** Wello Code is an open-source desktop coding agent for Windows, powered by a [Wello](https://wello.dev) account. The interface is currently Russian only, so this README is written in Russian.
+> **In English:** Wello Code is an open-source desktop coding agent for **Windows and macOS (Apple Silicon only)**, powered by a [Wello](https://wello.dev) account. The interface is currently Russian only, so this README is written in Russian.
 
 ---
 
@@ -59,13 +59,19 @@
 > значит, что с файлом что-то не так: так система реагирует на любую программу без платной
 > подписи. Нажмите **«Подробнее»**, затем **«Выполнить в любом случае»**.
 
+> **macOS.** Откройте скачанный `.dmg` и перетащите **Wello Code** в папку «Программы».
+> Сборка подписана ad-hoc, но не нотаризована у Apple, поэтому при первом запуске macOS
+> скажет, что не может проверить разработчика. Откройте приложение **правым кликом →
+> «Открыть» → «Открыть»** (или **Системные настройки → Конфиденциальность и безопасность →
+> «Открыть всё равно»**). Это нужно сделать один раз.
+
 Обновления приходят автоматически и скачиваются частями: приложение сравнивает старую и
 новую сборку и тянет только изменившиеся куски, поэтому обычное обновление весит пару
 мегабайт, а не всю сборку целиком. Ничего не устанавливается без вашего подтверждения.
 
 ## Что нужно
 
-- **Windows 10 или новее**, 64 бита. Версия для macOS готовится.
+- **Windows 10 или новее** (64 бита), либо **macOS 11 Big Sur и новее** — **только на чипах Apple (M1 и новее)**. На Mac с процессором Intel приложение не запустится: сборки под Intel нет.
 - **Аккаунт [Wello](https://wello.dev)** с подпиской Pro или Max. Без подписки приложение
   работает с баланса по факту использования.
 - Около 550 МБ на диске после установки.
@@ -96,6 +102,8 @@ pnpm --filter @wello-code/desktop dist:win
 ```
 
 Готовый инсталлятор появится в `apps/desktop/release/installer/`.
+
+Сборка под macOS выполняется в CI (`.github/workflows/release.yml`) — локального `dist:mac` нет.
 
 ## Как устроено
 
