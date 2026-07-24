@@ -57,6 +57,26 @@ async function main() {
   );
   await cp(join(appRoot, "out"), join(stagedApp, "out"), { recursive: true });
 
+  // 2a. The updater's config, next to resources/app.
+  //
+  // MUST be written here by hand. electron-builder normally injects app-update.yml
+  // from its `publish` section, but it does that in the afterPack hook — and the
+  // Windows target packs an ALREADY-STAGED directory (`--prepackaged`), which makes
+  // doPack() return before any pack hook runs. So nothing ever wrote this file and
+  // every Windows build shipped without it.
+  //
+  // Without it electron-updater finds an update (our feed URL is set in code) and
+  // then dies at download time with ENOENT on app-update.yml, surfacing as
+  // «Не удалось скачать обновление» — auto-update was dead on Windows through
+  // v0.1.2. macOS was never affected: electron-builder packs it itself.
+  //
+  // Keep `updaterCacheDirName` stable; it names the download cache under
+  // %LOCALAPPDATA% and the `publish` values must match electron-builder.yml.
+  await writeFile(
+    join(distDir, "resources", "app-update.yml"),
+    ["provider: github", "owner: wello-code", "repo: wello-code", "updaterCacheDirName: wello-code-updater", ""].join("\n"),
+  );
+
   // 2b. Bundled skills (data, not code — vite doesn't touch them). Resolved at
   // runtime as `<out/main>/../../skills-bundle`, i.e. resources/app/skills-bundle.
   await cp(join(appRoot, "skills-bundle"), join(stagedApp, "skills-bundle"), { recursive: true });
