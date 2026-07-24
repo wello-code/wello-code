@@ -439,9 +439,8 @@ function initialMode(): TaskMode {
   return "manual";
 }
 
-// Haiku 4.5 removed 2026-07-15: dropped from the Wello catalog (upstream bridge
-// down, worst price/quality in the lineup). A stored selection falls back to
-// Sonnet 5 via initialModel()'s validation.
+// Haiku 4.5 is not offered in the Wello catalog; a stored selection of it falls
+// back to Sonnet 5 via initialModel()'s validation.
 const MODELS: { id: string; label: string; hint: string }[] = [
   { id: "claude-sonnet-5", label: "Sonnet 5", hint: "Баланс скорости и качества" },
   { id: "claude-opus-4-8", label: "Opus 4.8", hint: "Сложные задачи, максимум качества" },
