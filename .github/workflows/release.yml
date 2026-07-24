@@ -2,9 +2,16 @@ name: Release
 
 # One-command release. Push a tag `vX.Y.Z` (or run this by hand) and CI builds
 # BOTH platforms and publishes the GitHub Release the auto-updater reads — nothing
-# is built on anyone's laptop. The release is assembled as a DRAFT (electron-builder's
-# default) and only flipped public by the final job, so a half-uploaded release is
-# never briefly live and no mac-less/win-less window exists for the updater to trip on.
+# is built on anyone's laptop. The release is assembled as a DRAFT and only flipped
+# public by the final job, so a half-uploaded release is never briefly live and no
+# mac-less/win-less window exists for the updater to trip on.
+#
+# The `create-release` job exists because of a real failure (v0.1.2): when the FIRST
+# publishing job also has to CREATE the release, electron-builder's own concurrent
+# artifact uploads race to create it — one wins, the other's file is dropped, and the
+# step still exits 0. It cost us the Windows .exe and latest.yml. Creating the empty
+# draft up front means every platform job only ever UPLOADS to an existing release,
+# which is the race-free path (it is exactly why the mac job never lost anything).
 #
 # Publishing uses the built-in GITHUB_TOKEN (no secret to manage). Nothing here is
 # signed with a paid certificate: Windows ships unsigned, macOS ad-hoc (see
@@ -19,9 +26,30 @@ permissions:
   contents: write
 
 jobs:
+  create-release:
+    name: create the draft release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Empty draft, keyed to the package version so it works on a pushed tag or a
+      # manual run. Idempotent: a re-run finds the existing draft and reuses it.
+      - name: Create (or reuse) the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v$(node -p "require('./package.json').version")"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — reusing it."
+          else
+            gh release create "$TAG" --draft --title "$TAG" \
+              --notes "Automated release. See the commit history for what changed." \
+              --repo "$GITHUB_REPOSITORY"
+          fi
+
   windows:
     name: build · publish (Windows)
     runs-on: windows-latest
+    needs: create-release
     steps:
       - uses: actions/checkout@v4
       # No `version:` — package.json pins packageManager (pnpm@11.x); action-setup
@@ -45,10 +73,10 @@ jobs:
   macos:
     name: build · publish (macOS arm64)
     runs-on: macos-latest
-    # Sequential, not parallel: one job creates the draft release and the other
-    # appends to it. Two jobs racing to create the same release is the one way this
-    # publish step can flake, and a release is infrequent enough that the extra
-    # wall-clock does not matter.
+    # The draft already exists (create-release), so this only uploads — the create
+    # race is gone. Kept after windows rather than parallel purely as belt-and-
+    # suspenders against any concurrent-upload quirk; a release is infrequent enough
+    # that the extra wall-clock does not matter.
     needs: windows
     steps:
       - uses: actions/checkout@v4
