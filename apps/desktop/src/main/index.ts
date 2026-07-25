@@ -544,9 +544,20 @@ function registerIpc(): void {
     if (allowWorkspace(input.workspacePath)) {
       // For a plain (non-git) folder, capture the pre-run baseline for snapshot
       // review BEFORE the agent's first write — awaited so nothing leaks in.
-      const isRepo = (await gitService.status(input.workspacePath)).isRepo;
-      if (!isRepo) {
+      const st = await gitService.status(input.workspacePath);
+      if (!st.isRepo) {
         await snapshot.ensureBaseline(input.taskId, input.workspacePath).catch(() => undefined);
+      } else {
+        // Git repo: record what was ALREADY uncommitted, so the review pane can
+        // tell the agent's work from the user's (see review.ts). Awaited for the
+        // same reason as the snapshot — it must precede the first write.
+        await snapshot
+          .ensureGitBaseline(
+            input.taskId,
+            input.workspacePath,
+            st.files.map((f) => f.path),
+          )
+          .catch(() => undefined);
       }
       // A per-turn checkpoint (git OR not) so "rewind to this turn" can restore
       // the project to its pre-turn state. Labelled by the run id; awaited so the

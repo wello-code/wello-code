@@ -180,6 +180,134 @@ export async function ensureBaseline(taskId: string, cwd: string): Promise<void>
   });
 }
 
+/* ── Git baseline: what was ALREADY dirty when the task started ──────────────
+   In a git repo the review pane reads `git status`, which knows nothing about
+   tasks: it shows every uncommitted change in the folder. So a user who opened
+   a project with unsaved work saw it attributed to a run that had not even
+   happened ("изменено 13 файлов" after a 402), and «Отменить» offered to throw
+   THEIR work away. We record the already-dirty files at task start — content
+   included, in the same deduped object store — so the review can subtract them
+   and revert can put them back byte-for-byte instead of resetting to HEAD. */
+
+const GIT_BASELINE_FILE = "git-baseline.json";
+/** Cap the pre-existing dirt we store: a huge uncommitted tree is not worth GBs. */
+const GIT_BASELINE_MAX_FILES = 500;
+
+interface GitBaseline {
+  version: 1;
+  createdAt: string;
+  root: string;
+  /** Only the files git reported as dirty at task start. */
+  files: Record<string, SnapshotFileMeta>;
+}
+
+function gitBaselinePath(taskId: string): string {
+  return join(taskDir(taskId), GIT_BASELINE_FILE);
+}
+
+/**
+ * Capture the already-dirty files of a git workspace for this task (idempotent —
+ * the first run of a task wins, later runs keep the original baseline so the
+ * review keeps showing everything the task has done, not just its last turn).
+ * Best-effort: a failure only degrades to the old, unfiltered behaviour.
+ */
+export async function ensureGitBaseline(
+  taskId: string,
+  cwd: string,
+  dirtyPaths: string[],
+): Promise<void> {
+  sanitizeTaskId(taskId);
+  if (await loadGitBaseline(taskId)) return;
+  const files: Record<string, SnapshotFileMeta> = {};
+  let total = 0;
+  await mkdir(join(taskDir(taskId), "objects"), { recursive: true });
+  for (const rel of dirtyPaths.slice(0, GIT_BASELINE_MAX_FILES)) {
+    let real: string | null;
+    try {
+      real = await realInside(cwd, assertInside(cwd, rel));
+    } catch {
+      continue; // path escapes the workspace — not ours to record
+    }
+    if (!real) continue;
+    const info = await stat(real).catch(() => null);
+    if (!info || !info.isFile()) continue;
+    if (info.size > SNAPSHOT_MAX_FILE_BYTES || total + info.size > SNAPSHOT_MAX_TOTAL_BYTES) continue;
+    const buf = await readFile(real).catch(() => null);
+    if (!buf) continue;
+    const hash = createHash("sha256").update(buf).digest("hex");
+    const obj = objectPath(taskId, hash);
+    if (!(await stat(obj).catch(() => null))) {
+      const tmp = `${obj}.tmp`;
+      await writeFile(tmp, buf);
+      await rename(tmp, obj);
+    }
+    files[rel] = { hash, size: info.size, mtimeMs: info.mtimeMs, binary: isBinary(buf) };
+    total += info.size;
+  }
+  const target = gitBaselinePath(taskId);
+  await mkdir(dirname(target), { recursive: true });
+  const tmp = `${target}.tmp`;
+  await writeFile(
+    tmp,
+    JSON.stringify({ version: 1, createdAt: new Date().toISOString(), root: cwd, files } satisfies GitBaseline),
+    "utf8",
+  );
+  await rename(tmp, target);
+}
+
+export async function loadGitBaseline(taskId: string): Promise<GitBaseline | null> {
+  if (!/^[A-Za-z0-9_-]+$/.test(taskId)) return null;
+  try {
+    return JSON.parse(await readFile(gitBaselinePath(taskId), "utf8")) as GitBaseline;
+  } catch {
+    return null;
+  }
+}
+
+/** True when `rel` still holds exactly the bytes it had at task start. */
+export async function matchesGitBaseline(
+  cwd: string,
+  rel: string,
+  meta: SnapshotFileMeta,
+): Promise<boolean> {
+  let real: string | null;
+  try {
+    real = await realInside(cwd, assertInside(cwd, rel));
+  } catch {
+    return false;
+  }
+  if (!real) return false;
+  const info = await stat(real).catch(() => null);
+  if (!info || !info.isFile()) return false;
+  if (info.size !== meta.size) return false;
+  if (info.mtimeMs === meta.mtimeMs) return true; // untouched — skip the hash
+  const buf = await readFile(real).catch(() => null);
+  if (!buf) return false;
+  return createHash("sha256").update(buf).digest("hex") === meta.hash;
+}
+
+/**
+ * Restore a file to the bytes it had when the task started (NOT to HEAD): the
+ * file was already modified by the user before the agent touched it, so a git
+ * checkout would silently delete work the agent never made.
+ */
+export async function restoreGitBaselineFile(taskId: string, cwd: string, rel: string): Promise<boolean> {
+  const base = await loadGitBaseline(taskId);
+  const meta = base?.files[rel];
+  if (!meta) return false;
+  const buf = await readFile(objectPath(taskId, meta.hash)).catch(() => null);
+  if (!buf) return false;
+  const abs = assertInside(cwd, rel);
+  const parent = dirname(abs);
+  const realParent = await realInside(cwd, parent);
+  if (!realParent && (await stat(parent).catch(() => null))) return false; // parent escapes — refuse
+  await mkdir(parent, { recursive: true });
+  const tmp = `${abs}.wello-tmp`;
+  await writeFile(tmp, buf);
+  await rename(tmp, abs);
+  return true;
+}
+
 interface Change {
   rel: string;
   status: "added" | "modified" | "deleted";

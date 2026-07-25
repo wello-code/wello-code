@@ -564,6 +564,8 @@ function Workspace({
   // (one acknowledged choice, persisted) or the paywall CTAs when even PAYG
   // can't fund a turn. Never shown to an active subscriber.
   const [gateClosed, setGateClosed] = useState(false);
+  /** "Я оплатил" is re-checking access against the gateway right now. */
+  const [accessChecking, setAccessChecking] = useState(false);
   const [taskMenuId, setTaskMenuId] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; title: string } | null>(null);
@@ -668,6 +670,63 @@ function Workspace({
     setPanels((p) => p.filter((id) => !id.startsWith("file:")));
     setMaximizedPanel((m) => (m?.startsWith("file:") ? null : m));
   }, [activePath]);
+  /**
+   * The composer paywall. `billing === "blocked"` is the gateway's own verdict
+   * that the NEXT turn cannot be funded — it would answer 402 and the agent
+   * would do nothing. Letting the field accept a prompt in that state is how a
+   * user without a plan got "работа идёт" and an error instead of a straight
+   * answer (reported 2026-07-25), so the composer locks and says why.
+   *
+   * Two different dead ends, two different exits:
+   *   no plan at all      → Wello Code is a Pro/Max perk (or top up for PAYG);
+   *   plan, cap exhausted → wait for renewal, upgrade, or allow PAYG overflow.
+   */
+  const funding = useMemo((): {
+    title: string;
+    body: string;
+    placeholder: string;
+    actions: { label: string; primary?: boolean; onClick: () => void }[];
+  } | null => {
+    if (subInfo.billing !== "blocked") return null;
+    if (subInfo.planActive) {
+      return {
+        title: "Лимит тарифа исчерпан",
+        body: "Лимит вернётся при продлении подписки. Можно перейти на старший тариф или разрешить оплату сверх лимита с баланса.",
+        placeholder: "Лимит тарифа исчерпан",
+        actions: [
+          {
+            label: "Сменить тариф",
+            primary: true,
+            onClick: () => void window.wello.openExternal(`${BILLING_URL}#plans`),
+          },
+          {
+            label: "Оплата сверх лимита",
+            onClick: () => {
+              setSettingsOpen(true);
+              setSettingsPage("account");
+            },
+          },
+        ],
+      };
+    }
+    return {
+      title: "Wello Code работает на подписке Pro и Max",
+      body: "На аккаунте нет ни подписки, ни средств на балансе. Оформите подписку — или пополните баланс, чтобы платить по факту.",
+      placeholder: "Нужна подписка Pro или Max",
+      actions: [
+        {
+          label: "Оформить подписку",
+          primary: true,
+          onClick: () => void window.wello.openExternal(`${BILLING_URL}#plans`),
+        },
+        {
+          label: "Пополнить баланс",
+          onClick: () => void window.wello.openExternal(`${BILLING_URL}#topup`),
+        },
+      ],
+    };
+  }, [subInfo.billing, subInfo.planActive, setSettingsPage]);
+
   // A nearly-full context window — nudge toward a fresh task before early detail is lost.
   const ctx = activeTask?.agent;
   const contextHigh =
@@ -1077,6 +1136,34 @@ function Workspace({
     prevRunning.current = activeRunning;
   }, [activeRunning]);
 
+  /**
+   * Re-reads the billing status from the gateway (the same call the startup
+   * check makes). Used by the composer paywall's "Я оплатил" button so a plan
+   * bought in the browser lands here without restarting the app.
+   */
+  const recheckAccess = async (): Promise<void> => {
+    setAccessChecking(true);
+    try {
+      const c = await window.wello.getConnection();
+      if (c.balanceCents != null) setBalanceCents(c.balanceCents);
+      if (c.billing) {
+        setSubInfo({
+          billing: c.billing,
+          planId: c.planId ?? null,
+          planActive: c.planActive,
+          usedFraction: c.usedFraction ?? null,
+          email: c.email ?? null,
+          displayName: c.displayName ?? null,
+        });
+        if (c.billing !== "blocked") composerRef.current?.focus();
+      }
+    } catch {
+      /* offline: the paywall simply stays put */
+    } finally {
+      setAccessChecking(false);
+    }
+  };
+
   const selectModel = (id: string): void => {
     setModel(id);
     localStorage.setItem(MODEL_LS_KEY, id);
@@ -1256,6 +1343,9 @@ function Workspace({
   };
 
   const send = async (): Promise<void> => {
+    // No funding for the next turn: the gateway would 402 and nothing would run.
+    // The composer is disabled in this state; this guards the Enter key path.
+    if (fundingRef.current) return;
     const text = prompt.trim();
     if (!text && attachments.length === 0) return;
     // New chat without a folder yet: open the picker instead of silently doing
@@ -1356,6 +1446,10 @@ function Workspace({
   // The freshest send() for resumed closures (the trust modal's continue).
   const sendRef = useRef(send);
   sendRef.current = send;
+  // send() is also reached from a resumed (stale) closure — read the paywall
+  // through a ref so a locked account can't slip a turn through an old render.
+  const fundingRef = useRef(funding);
+  fundingRef.current = funding;
 
   // Auto-send a task's queued type-ahead stack — merged into ONE follow-up turn
   // (Claude Code): texts join with blank lines, images/attachments concatenate.
@@ -2668,7 +2762,38 @@ function Workspace({
                 {workspace ? <span className="composer__project-path">{workspace.path}</span> : null}
               </button>
             ) : null}
-            <div className={`composer__box ${dragOver && !activeRunning ? "is-dragover" : ""}`}>
+            <div
+              className={`composer__box ${dragOver && !activeRunning ? "is-dragover" : ""} ${
+                funding ? "is-locked" : ""
+              }`}
+            >
+              {funding ? (
+                <div className="paywall" role="status">
+                  <div className="paywall__text">
+                    <span className="paywall__title">{funding.title}</span>
+                    <span className="paywall__sub">{funding.body}</span>
+                  </div>
+                  <div className="paywall__actions">
+                    {funding.actions.map((a) => (
+                      <button
+                        key={a.label}
+                        className={`button ${a.primary ? "primary" : "ghost"} sm`}
+                        onClick={a.onClick}
+                      >
+                        {a.label}
+                      </button>
+                    ))}
+                    <button
+                      className="button ghost sm"
+                      disabled={accessChecking}
+                      onClick={() => void recheckAccess()}
+                      title="Перепроверить доступ после оплаты"
+                    >
+                      {accessChecking ? "Проверяю…" : "Я оплатил"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               {editing ? (
                 <div className="attachnote editnote" role="status">
                   <span className="attachnote__icon" aria-hidden>
@@ -2803,16 +2928,19 @@ function Workspace({
                 ref={composerRef}
                 className="composer__input"
                 rows={1}
+                disabled={!!funding}
                 placeholder={
                   // Queued messages live as bubbles at the thread's tail — the
                   // placeholder stays the ordinary typing hint.
-                  activeRunning
-                    ? "Печатайте — отправлю после ответа"
-                    : activeTask
-                      ? "Запросите внесение дополнительных изменений"
-                      : workspace
-                        ? "Спросите что угодно"
-                        : "Сначала выберите папку проекта"
+                  funding
+                    ? funding.placeholder
+                    : activeRunning
+                      ? "Печатайте — отправлю после ответа"
+                      : activeTask
+                        ? "Запросите внесение дополнительных изменений"
+                        : workspace
+                          ? "Спросите что угодно"
+                          : "Сначала выберите папку проекта"
                 }
                 value={prompt}
                 onChange={(e) => {
@@ -3071,6 +3199,7 @@ function Workspace({
                       title="Отправить (Enter)"
                       aria-label="Отправить"
                       disabled={
+                        !!funding ||
                         (activeTask ? !activePath : !workspace) ||
                         (!prompt.trim() && attachments.length === 0)
                       }
