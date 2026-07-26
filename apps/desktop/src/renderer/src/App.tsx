@@ -39,6 +39,7 @@ import { BranchPopover } from "./BranchPopover";
 import { GithubConnectCard } from "./GitHubConnect";
 import { chatToMarkdown, transcriptForHandoff } from "./transcript";
 import { Modal, ModalCancel } from "./Modal";
+import type { UpdateStatus } from "../../shared/ipc-api";
 import type { TimelineItem, UserAttachment } from "./agent-state";
 import { describeCurrentAction, toolActionLabel } from "./agent-state";
 import {
@@ -569,6 +570,11 @@ function Workspace({
   const [gateClosed, setGateClosed] = useState(false);
   /** "Я оплатил" is re-checking access against the gateway right now. */
   const [accessChecking, setAccessChecking] = useState(false);
+  // Auto-update state, mirrored into the sidebar. It used to live ONLY inside
+  // Settings → О приложении, so a user who never opened settings never learned
+  // a release existed — the updater worked and nobody saw it.
+  const [update, setUpdate] = useState<UpdateStatus>({ state: "idle" });
+  const [updateHidden, setUpdateHidden] = useState(false);
   const [taskMenuId, setTaskMenuId] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; title: string } | null>(null);
@@ -1114,6 +1120,13 @@ function Workspace({
   queueRef.current = queue;
   const flushQueuedRef = useRef<(taskId: string, batch: QueuedMessage[]) => void>(() => {});
   const returnQueueRef = useRef<(taskId: string) => void>(() => {});
+
+  // Push updates from main; also pull once, since a check may have finished
+  // before this component mounted.
+  useEffect(() => {
+    void window.wello.getUpdateStatus().then(setUpdate);
+    return window.wello.onUpdateStatus(setUpdate);
+  }, []);
 
   useEffect(() => {
     if (prevRunning.current && !activeRunning) {
@@ -2550,6 +2563,39 @@ ${t.workspaceName}` : t.title
           )}
         </div>
         <div className="sidebar-footer">
+          {/* A release the user has not taken yet. Lives here, above the account
+              row, because it is the one thing in the sidebar that is about the
+              APP rather than the work — and because Settings, where this used to
+              be the only mention, is exactly where people do not look. */}
+          {!updateHidden && (update.state === "available" || update.state === "ready" || update.state === "downloading") ? (
+            <div className="updbar">
+              <span className="updbar__dot" aria-hidden />
+              <span className="updbar__text">
+                {update.state === "downloading"
+                  ? `Загрузка… ${update.percent}%`
+                  : `Версия ${update.version} доступна`}
+              </span>
+              {update.state === "downloading" ? null : (
+                <button
+                  className="button ghost sm updbar__action"
+                  onClick={() => {
+                    if (update.state === "ready") void window.wello.installUpdate();
+                    else void window.wello.downloadUpdate();
+                  }}
+                >
+                  {update.state === "ready" ? "Перезапустить" : "Обновить"}
+                </button>
+              )}
+              <button
+                className="updbar__x"
+                title="Скрыть до перезапуска"
+                aria-label="Скрыть уведомление об обновлении"
+                onClick={() => setUpdateHidden(true)}
+              >
+                <Icon name="x" size={11} />
+              </button>
+            </div>
+          ) : null}
           {(() => {
             // ONE account row (Claude Code style): avatar, identity, live usage,
             // chevron — the dropdown above it carries settings/billing/sign-out.
