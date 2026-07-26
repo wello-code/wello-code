@@ -2038,7 +2038,6 @@ function Workspace({
   // nothing — fall back to "all".
   useEffect(() => {
     if (!projectExists(projects, projectPath)) selectProject(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projects, projectPath]);
 
   /** Scope the sidebar to a project and aim the NEXT new chat at its folder. */
