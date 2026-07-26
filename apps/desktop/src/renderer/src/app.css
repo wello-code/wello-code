@@ -531,6 +531,105 @@ body.is-col-resizing {
   border-bottom: 1px solid var(--border-subtle);
   margin-bottom: 6px;
 }
+/* --- Project scope (sidebar) -------------------------------------------
+   Chats have always belonged to a folder; this is the control that says which
+   folder the list is showing. Sits above «Новая задача» because it scopes it. */
+.projectsel {
+  position: relative;
+}
+.projectsel__btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--motion-hover),
+    color var(--motion-hover);
+}
+.projectsel__btn:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+.projectsel__btn > svg {
+  flex: none;
+}
+.projectsel__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 560;
+}
+.projectsel__menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-menu, 0 8px 24px rgb(0 0 0 / 0.35));
+}
+.projectsel__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.projectsel__item:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.projectsel__item.is-active {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.projectsel__item > svg {
+  flex: none;
+  color: var(--text-muted);
+}
+.projectsel__item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.projectsel__item-count {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.projectsel__sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border-subtle);
+}
+
 .newtask {
   display: flex;
   align-items: center;

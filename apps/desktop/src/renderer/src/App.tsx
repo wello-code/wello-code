@@ -44,6 +44,7 @@ import { describeCurrentAction, toolActionLabel } from "./agent-state";
 import {
   groupTasks,
   initialTasksState,
+  taskActivityMs,
   tasksReducer,
   titleFromPrompt,
   type TaskItem,
@@ -53,6 +54,7 @@ import { detectMention, rankFileMentions, type MentionQuery } from "./file-menti
 import { matchHotkey } from "./hotkeys";
 import { mergeQueued } from "./queued";
 import { contextAdvice } from "./context-cost";
+import { deriveProjects, filterByProject, projectExists, type Project } from "./projects";
 import { detectSlash, rankSlashCommands, type SlashQuery } from "./slash-command";
 import { commandArgString, expandCommandTemplate } from "../../shared/slash-template";
 import { AttachThumb, ChatImages, Lightbox } from "./Images";
@@ -578,6 +580,10 @@ function Workspace({
   const [ultraAsk, setUltraAsk] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [chatQuery, setChatQuery] = useState("");
+  // The project (folder) the sidebar is scoped to; null = all projects. Chats
+  // already carry their folder — this is the axis the list was missing.
+  const [projectPath, setProjectPath] = useState<string | null>(loadLastProject);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   // The list filters on a ~150ms debounce of the field — typing stays instant,
   // the grouping work runs once per pause instead of per keystroke.
   const [filterQuery, setFilterQuery] = useState("");
@@ -1997,10 +2003,41 @@ function Workspace({
   // disappear together with their captions (groupTasks skips empty bands).
   const taskGroups = useMemo(() => {
     const q = filterQuery.trim().toLowerCase();
-    const src = q ? state.tasks.filter((t) => t.title.toLowerCase().includes(q)) : state.tasks;
+    const scoped = filterByProject(state.tasks, projectPath);
+    const src = q ? scoped.filter((t) => t.title.toLowerCase().includes(q)) : scoped;
     return groupTasks(src);
-  }, [state.tasks, filterQuery]);
+  }, [state.tasks, filterQuery, projectPath]);
   const searching = filterQuery.trim().length > 0;
+
+  // Projects come from the chats themselves (plus the folder picked for the next
+  // one), so there is no registry to drift — see projects.ts.
+  const projects = useMemo(
+    () =>
+      deriveProjects(
+        state.tasks,
+        taskActivityMs,
+        workspace ? { path: workspace.path, name: workspace.name } : null,
+      ),
+    [state.tasks, workspace],
+  );
+  const activeProject = projectPath ? projects.find((p) => p.path === projectPath) ?? null : null;
+  // A project whose last chat was deleted must not leave the sidebar filtered to
+  // nothing — fall back to "all".
+  useEffect(() => {
+    if (!projectExists(projects, projectPath)) selectProject(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projects, projectPath]);
+
+  /** Scope the sidebar to a project and aim the NEXT new chat at its folder. */
+  function selectProject(path: string | null): void {
+    setProjectPath(path);
+    saveLastProject(path);
+    setProjectMenuOpen(false);
+    const p = path ? projects.find((x) => x.path === path) : null;
+    if (p && workspace?.path !== p.path) {
+      setWorkspace({ id: crypto.randomUUID(), path: p.path, name: p.name });
+    }
+  }
 
   /** Focus the sidebar chat search (Ctrl+F / the header button), opening the
    *  sidebar first when it's collapsed — an invisible input can't take focus.
@@ -2053,7 +2090,13 @@ function Workspace({
       {grip ?? null}
       <button
         className="recent-item__open"
-        title={t.title}
+        // In the all-projects view the row title alone is ambiguous ("Фикс
+        // логина" — in which repo?); the folder rides in the tooltip so the
+        // 32px single-line row stays as it is.
+        title={
+          !projectPath && t.workspaceName ? `${t.title}
+${t.workspaceName}` : t.title
+        }
         onClick={() => switchTo(t.id)}
       >
         {t.pinned && !grip ? (
@@ -2376,6 +2419,38 @@ function Workspace({
             neat 12px-padded group with a hairline before the list. kbd hints
             (Ctrl N on hover, Ctrl F while idle) share one chip style. */}
         <div className="sidebar-top">
+          {/* Project scope. Chats have always belonged to a folder; this is where
+              the user picks WHICH folder they are looking at (and the one the
+              next chat starts in). Hidden until there is a choice to make. */}
+          {projects.length > 0 ? (
+            <div className="projectsel">
+              <button
+                className="projectsel__btn"
+                title={activeProject ? activeProject.path : "Все проекты"}
+                aria-haspopup="menu"
+                aria-expanded={projectMenuOpen}
+                onClick={() => setProjectMenuOpen((v) => !v)}
+              >
+                <Icon name="folder" size={14} />
+                <span className="projectsel__name">
+                  {activeProject ? activeProject.name : "Все проекты"}
+                </span>
+                <Icon name="chevrondown" size={12} />
+              </button>
+              {projectMenuOpen ? (
+                <ProjectMenu
+                  projects={projects}
+                  active={projectPath}
+                  onPick={selectProject}
+                  onOpenFolder={() => {
+                    setProjectMenuOpen(false);
+                    void openFolder();
+                  }}
+                  onClose={() => setProjectMenuOpen(false)}
+                />
+              ) : null}
+            </div>
+          ) : null}
           <button
             className={`newtask ${!activeTask && !settingsOpen ? "is-active" : ""}`}
             onClick={() => switchTo(null)}
@@ -3453,6 +3528,59 @@ function Workspace({
   );
 }
 
+/**
+ * Project picker. Lists the folders that have chats (plus the one just opened),
+ * newest first, with a chat count — and the escape hatch to open another folder.
+ */
+function ProjectMenu({
+  projects,
+  active,
+  onPick,
+  onOpenFolder,
+  onClose,
+}: {
+  projects: Project[];
+  active: string | null;
+  onPick: (path: string | null) => void;
+  onOpenFolder: () => void;
+  onClose: () => void;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  useDropUp(true, onClose, rootRef);
+  return (
+    <div className="projectsel__menu" role="menu" ref={rootRef}>
+      <button
+        className={`projectsel__item ${active === null ? "is-active" : ""}`}
+        role="menuitemradio"
+        aria-checked={active === null}
+        onClick={() => onPick(null)}
+      >
+        <Icon name="folder" size={13} />
+        <span className="projectsel__item-name">Все проекты</span>
+      </button>
+      {projects.map((p) => (
+        <button
+          key={p.path}
+          className={`projectsel__item ${active === p.path ? "is-active" : ""}`}
+          role="menuitemradio"
+          aria-checked={active === p.path}
+          title={p.path}
+          onClick={() => onPick(p.path)}
+        >
+          <Icon name="folder" size={13} />
+          <span className="projectsel__item-name">{p.name}</span>
+          <span className="projectsel__item-count">{p.count > 0 ? p.count : ""}</span>
+        </button>
+      ))}
+      <div className="projectsel__sep" />
+      <button className="projectsel__item" role="menuitem" onClick={onOpenFolder}>
+        <Icon name="plus" size={13} />
+        <span className="projectsel__item-name">Открыть другую папку…</span>
+      </button>
+    </div>
+  );
+}
+
 /** Row action menu for a task in the sidebar. */
 function TaskMenu({
   pinned,
@@ -4099,6 +4227,24 @@ function TrustModal({
 
 /** "Continue with PAYG" acknowledgement — shown once per install, then remembered. */
 const PAYG_ACK_LS = "wello-code-payg-ack";
+
+/** The project the sidebar was scoped to last (path, or null for "all"). */
+const PROJECT_LS_KEY = "wello-code-project";
+function loadLastProject(): string | null {
+  try {
+    return window.localStorage.getItem(PROJECT_LS_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+function saveLastProject(path: string | null): void {
+  try {
+    if (path) window.localStorage.setItem(PROJECT_LS_KEY, path);
+    else window.localStorage.removeItem(PROJECT_LS_KEY);
+  } catch {
+    /* private mode — the scope just resets next launch */
+  }
+}
 
 /**
  * The subscription gate: Wello Code ships as a Pro+ perk. Without an active plan
