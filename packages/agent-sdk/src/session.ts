@@ -260,19 +260,24 @@ const ULTRA_SETTINGS: Settings = { ultracode: true, enableWorkflows: true };
  * on re-read context, the per-turn read growing 90K → 679K while the number of
  * turns stayed flat (owner analysis 2026-07-25).
  *
- * 200K is the window the engine's compaction is actually tuned for (it is the
- * default Claude window), so this restores the behaviour every other Claude
- * Code user gets, without giving up the honest 1M gauge. Compaction costs one
- * summarisation turn and saves the cache-read of the whole history on every
- * turn after it.
+ * So the DEFAULT is 200K — the window the engine's compaction is tuned for.
+ * It is only a default: the caller passes the user's own budget, and 0 turns
+ * auto-compaction off entirely, which hands back the model's full 1M window for
+ * the people who actually need it (a large codebase, a long document). The 1M
+ * context itself is untouched either way — this is when to summarise, not how
+ * much the model can hold.
  */
-const AUTO_COMPACT_WINDOW_TOKENS = 200_000;
+const DEFAULT_AUTO_COMPACT_WINDOW_TOKENS = 200_000;
 
-/** Settings every run carries (merged with the mode-specific ones). */
-const BASE_SETTINGS: Settings = {
-  autoCompactEnabled: true,
-  autoCompactWindow: AUTO_COMPACT_WINDOW_TOKENS,
-};
+/** Engine settings for one run: the compaction budget plus the mode's own flags. */
+export function runSettings(autoCompactWindow: number | undefined, ultra: boolean): Settings {
+  const budget = autoCompactWindow ?? DEFAULT_AUTO_COMPACT_WINDOW_TOKENS;
+  const compaction: Settings =
+    budget > 0
+      ? { autoCompactEnabled: true, autoCompactWindow: budget }
+      : { autoCompactEnabled: false };
+  return ultra ? { ...compaction, ...ULTRA_SETTINGS } : compaction;
+}
 
 /** The UI's effort scale: the engine's five levels plus our «Ультра» position. */
 export type WelloEffort = EffortLevel | "ultra";
@@ -413,6 +418,12 @@ export interface SdkRunRequest {
     string,
     { command: string; args?: string[] } | { type: "sse" | "http"; url: string }
   >;
+  /**
+   * Context size (tokens) at which the engine auto-compacts the conversation.
+   * 0 = never (the model's full window is used). Absent = the default budget —
+   * see DEFAULT_AUTO_COMPACT_WINDOW_TOKENS for why there is one at all.
+   */
+  autoCompactWindow?: number;
   /** Local plugin/skill directories to load into the engine. */
   pluginPaths?: string[];
   /**
@@ -951,7 +962,7 @@ export class SdkAgentSession {
       // permission allow-lists), so nothing project-level loads before the user
       // trusts the folder. The 'user' source (host ~/.claude) is never loaded.
       settingSources: req.trusted ? ["project", "local"] : [],
-      settings: ultra ? { ...BASE_SETTINGS, ...ULTRA_SETTINGS } : BASE_SETTINGS,
+      settings: runSettings(req.autoCompactWindow, ultra),
       systemPrompt: {
         type: "preset",
         preset: "claude_code",

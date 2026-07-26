@@ -127,6 +127,12 @@ export class AgentRuntime {
         pluginPaths,
         skills,
         additionalDirectories: [pastesDir()],
+        // How much conversation the engine carries before summarising it. The
+        // user's choice (Settings → Общее); 0 = never, i.e. the model's full
+        // window. Read per run, so a change applies to the very next turn.
+        ...(typeof settings.autoCompactWindow === "number"
+          ? { autoCompactWindow: settings.autoCompactWindow }
+          : {}),
         github: {
           connected: ghStatus.connected,
           ...("login" in ghStatus && ghStatus.login ? { login: ghStatus.login } : {}),

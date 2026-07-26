@@ -7,6 +7,7 @@ import {
   normalizeDirPrefix,
   pathInsideRoots,
   resolveEffort,
+  runSettings,
   taskIdFromCreateResult,
   todosFromToolInput,
   workflowProgressAgents,
@@ -55,6 +56,35 @@ describe("engineModelId", () => {
   it("leaves 200K models and unknown ids untouched", () => {
     expect(engineModelId("claude-sonnet-4.6")).toBe("claude-sonnet-4.6");
     expect(engineModelId("some-future-model")).toBe("some-future-model");
+  });
+});
+
+describe("runSettings (auto-compaction budget)", () => {
+  it("defaults to a bounded budget instead of the model's whole window", () => {
+    // Without this the 1M "[1m]" variant pushed auto-compaction to ~1M tokens,
+    // i.e. effectively never — which is how a month's plan went on re-read context.
+    const s = runSettings(undefined, false);
+    expect(s.autoCompactEnabled).toBe(true);
+    expect(s.autoCompactWindow).toBe(200_000);
+  });
+
+  it("honours the user's own budget", () => {
+    expect(runSettings(400_000, false).autoCompactWindow).toBe(400_000);
+  });
+
+  it("0 means NEVER compact — the full window is the point of a 1M model", () => {
+    const s = runSettings(0, false);
+    expect(s.autoCompactEnabled).toBe(false);
+    // No budget is sent at all: an autoCompactWindow with compaction off would
+    // be a contradiction for the engine to resolve.
+    expect(s.autoCompactWindow).toBeUndefined();
+  });
+
+  it("keeps the Ультра flags alongside the compaction choice", () => {
+    const s = runSettings(0, true);
+    expect(s.ultracode).toBe(true);
+    expect(s.enableWorkflows).toBe(true);
+    expect(s.autoCompactEnabled).toBe(false);
   });
 });
 

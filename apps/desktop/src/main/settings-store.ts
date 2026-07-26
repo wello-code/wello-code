@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { app } from "electron";
-import type { AppSettings } from "../shared/ipc-api";
+import { DEFAULT_AUTO_COMPACT_WINDOW, type AppSettings } from "../shared/ipc-api";
 import { defaultBundledSkillState, resolveBundledSkillState } from "../shared/bundled-skills";
 
 /** User-editable app settings (MCP connectors, plugins, git) in userData as JSON. */
@@ -15,6 +15,7 @@ const DEFAULTS: AppSettings = {
   gitCommitInstructions: "",
   gitPrDraftDefault: true,
   gitPrInstructions: "",
+  autoCompactWindow: DEFAULT_AUTO_COMPACT_WINDOW,
 };
 
 /** Keep only boolean entries of a saved on/off map (defensive against hand-edits). */
@@ -50,6 +51,11 @@ export async function loadSettings(): Promise<AppSettings> {
       gitPrDraftDefault: parsed.gitPrDraftDefault !== false, // default on
       gitPrInstructions:
         typeof parsed.gitPrInstructions === "string" ? parsed.gitPrInstructions : "",
+      // 0 is a real value here ("never compact"), so only a non-number falls back.
+      autoCompactWindow:
+        typeof parsed.autoCompactWindow === "number" && parsed.autoCompactWindow >= 0
+          ? Math.round(parsed.autoCompactWindow)
+          : DEFAULT_AUTO_COMPACT_WINDOW,
     };
   } catch {
     return { ...DEFAULTS };

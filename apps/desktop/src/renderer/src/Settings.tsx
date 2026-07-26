@@ -6,6 +6,7 @@ import type {
   PluginSetting,
   UpdateStatus,
 } from "../../shared/ipc-api";
+import { DEFAULT_AUTO_COMPACT_WINDOW } from "../../shared/ipc-api";
 import { BUNDLED_SKILLS, resolveBundledSkillState } from "../../shared/bundled-skills";
 import {
   HOTKEY_ROWS,
@@ -579,6 +580,37 @@ function GeneralPage({
                   onChange={(v) => persist({ ...settings, notifications: v })}
                   label="Системные уведомления"
                 />
+              ) : undefined
+            }
+          />
+        </Card>
+      </Section>
+      <Section title="Контекст">
+        <Card>
+          <Row
+            rowId="autocompact"
+            title="Сжимать диалог автоматически"
+            desc={
+              "Агент пересылает весь диалог на каждом шаге, поэтому длинный чат съедает лимит " +
+              "быстрее всего. При достижении порога он сжимается в краткую выжимку. " +
+              "«Не сжимать» отдаёт модели всё её окно — берите, если работаете с большой " +
+              "кодовой базой или длинным документом и готовы платить за объём."
+            }
+            control={
+              settings ? (
+                <select
+                  className="settings-select"
+                  aria-label="Порог автосжатия контекста"
+                  value={String(settings.autoCompactWindow ?? DEFAULT_AUTO_COMPACT_WINDOW)}
+                  onChange={(e) =>
+                    persist({ ...settings, autoCompactWindow: Number(e.target.value) })
+                  }
+                >
+                  <option value="100000">100К токенов — экономно</option>
+                  <option value="200000">200К токенов — по умолчанию</option>
+                  <option value="400000">400К токенов</option>
+                  <option value="0">Не сжимать (всё окно модели)</option>
+                </select>
               ) : undefined
             }
           />

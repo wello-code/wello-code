@@ -264,6 +264,12 @@ export interface StartRunInput {
   resumeSessionId?: string;
   /** Edit-a-turn: fork the resumed session at this engine message uuid. */
   resumeAtMessageUuid?: string;
+  /**
+   * Context size (tokens) at which the engine auto-compacts the conversation.
+   * 0 = never compact automatically (the model's full window is used). Absent =
+   * the app's default. See AppSettings.autoCompactWindow.
+   */
+  autoCompactWindow?: number;
 }
 
 /**
@@ -300,6 +306,13 @@ export interface PluginSetting {
   enabled: boolean;
 }
 
+/**
+ * Default context budget before a conversation is auto-compacted (tokens).
+ * A default, not a cap: Settings → Общее lets the user raise it or switch
+ * compaction off entirely (0), which hands back the model's full window.
+ */
+export const DEFAULT_AUTO_COMPACT_WINDOW = 200_000;
+
 export interface AppSettings {
   mcpServers: McpServerSetting[];
   plugins: PluginSetting[];
@@ -324,6 +337,17 @@ export interface AppSettings {
   gitPrDraftDefault?: boolean;
   /** Extra instructions appended to the PR-description generation prompt ("" = none). */
   gitPrInstructions?: string;
+  /**
+   * Context size (tokens) at which a conversation is auto-compacted.
+   *
+   * The agent re-sends the whole conversation every turn, so a long chat quietly
+   * becomes the main thing a plan is spent on — hence a default that keeps it in
+   * check (200K, the window the engine's compaction is tuned for). But the 1M
+   * window is a real feature people pay for: someone loading a large codebase or
+   * a long document needs it, so the ceiling is theirs to raise, up to "never"
+   * (0), which gives back the model's full window.
+   */
+  autoCompactWindow?: number;
 }
 
 /** Result of reading a workspace file for the inspector's file view. */
