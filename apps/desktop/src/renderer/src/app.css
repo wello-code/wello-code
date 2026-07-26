@@ -2349,6 +2349,22 @@ body.is-col-resizing {
   margin-top: 1px;
   color: var(--warning);
 }
+/* The context is no longer just "filling up" — it is the main thing being paid
+   for on every turn. Read louder than the ordinary hint. */
+.ctx__warn--urge {
+  color: var(--text-secondary);
+}
+.ctx__warn--urge svg {
+  color: var(--danger);
+}
+.attachnote--urge {
+  border-color: color-mix(in srgb, var(--danger) 30%, var(--border-subtle));
+  background: color-mix(in srgb, var(--danger) 7%, var(--surface-2));
+}
+.attachnote--urge .attachnote__icon {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
 .ctx__limits {
   margin-top: 10px;
   padding-top: 10px;

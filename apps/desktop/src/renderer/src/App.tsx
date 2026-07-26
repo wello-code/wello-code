@@ -52,6 +52,7 @@ import { admitAttachments, limitNotice } from "./attachments";
 import { detectMention, rankFileMentions, type MentionQuery } from "./file-mention";
 import { matchHotkey } from "./hotkeys";
 import { mergeQueued } from "./queued";
+import { contextAdvice } from "./context-cost";
 import { detectSlash, rankSlashCommands, type SlashQuery } from "./slash-command";
 import { commandArgString, expandCommandTemplate } from "../../shared/slash-template";
 import { AttachThumb, ChatImages, Lightbox } from "./Images";
@@ -727,13 +728,11 @@ function Workspace({
     };
   }, [subInfo.billing, subInfo.planActive, setSettingsPage]);
 
-  // A nearly-full context window — nudge toward a fresh task before early detail is lost.
+  // What the conversation costs to carry. The old rule fired at 90% of the
+  // WINDOW, i.e. 900K tokens on a 1M model — by then every turn had been
+  // expensive for hours (see context-cost.ts). Now it keys on cost.
   const ctx = activeTask?.agent;
-  const contextHigh =
-    !!ctx &&
-    !ctx.running &&
-    ctx.contextUsedTokens != null &&
-    ctx.contextUsedTokens / (ctx.contextWindowTokens ?? FALLBACK_CONTEXT_WINDOW) >= 0.9;
+  const contextTip = !ctx || ctx.running ? null : contextAdvice(ctx.contextUsedTokens ?? null);
 
   useEffect(
     () =>
@@ -1545,10 +1544,15 @@ function Workspace({
     if (ok) toast({ message: "Диалог экспортирован", tone: "success" });
   };
 
-  /** Start a fresh chat in the same folder, seeded with a handoff note that
-   *  carries this chat's context — a manual /compact between conversations. */
-  const continueInNewChat = async (task: TaskItem): Promise<void> => {
-    toast({ message: "Готовлю передачу контекста…" });
+  /**
+   * Compaction: summarise this chat and continue in a fresh one in the same
+   * folder, seeded with the summary. The engine keeps re-sending the whole
+   * conversation every turn, so a long chat quietly becomes the main thing the
+   * plan is spent on — this is the way out, and the composer offers it by name
+   * once the context gets expensive (see context-cost.ts).
+   */
+  const compactContext = async (task: TaskItem): Promise<void> => {
+    toast({ message: "Сжимаю контекст…" });
     const transcript = transcriptForHandoff(task.agent.items);
     const note = await window.wello.generateHandoff(transcript, model).catch(() => null);
     // Land on the home composer bound to the SAME folder, so the first send
@@ -2115,6 +2119,18 @@ function Workspace({
     },
     { name: "clear", label: "/clear", hint: "Очистить поле ввода", run: () => setPrompt("") },
     {
+      name: "compact",
+      label: "/compact",
+      // The command every Claude Code user reaches for. Ours summarises the chat
+      // and continues in a fresh session — same effect, and it works even when
+      // the engine's own auto-compaction has not kicked in yet.
+      hint: "Сжать контекст диалога",
+      run: () =>
+        activeTask
+          ? void compactContext(activeTask)
+          : toast({ message: "Сжимать пока нечего — диалог пуст" }),
+    },
+    {
       name: "terminal",
       label: "/terminal",
       hint: "Открыть терминал",
@@ -2591,7 +2607,7 @@ function Workspace({
                   }}
                   onContinueNew={() => {
                     setChatMenuOpen(false);
-                    void continueInNewChat(activeTask);
+                    void compactContext(activeTask);
                   }}
                   onToggleTrust={(trusted) => {
                     setChatMenuOpen(false);
@@ -2844,17 +2860,17 @@ function Workspace({
                   </button>
                 </div>
               ) : null}
-              {contextHigh ? (
-                <div className="attachnote" role="status">
+              {contextTip ? (
+                <div className={`attachnote ${contextTip.level === "urge" ? "attachnote--urge" : ""}`} role="status">
                   <span className="attachnote__icon" aria-hidden>
                     <Icon name="dot" size={12} />
                   </span>
-                  <span className="attachnote__text">
-                    Диалог стал длинным — детали ранних шагов могут потеряться. Для новой темы лучше начать
-                    новую задачу.
-                  </span>
-                  <button className="button ghost sm attachnote__action" onClick={() => switchTo(null)}>
-                    Новая задача
+                  <span className="attachnote__text">{contextTip.message}</span>
+                  <button
+                    className="button ghost sm attachnote__action"
+                    onClick={() => activeTask && void compactContext(activeTask)}
+                  >
+                    {contextTip.action}
                   </button>
                 </div>
               ) : null}
@@ -4678,7 +4694,15 @@ function ContextRing({
   const win = windowTokens ?? FALLBACK_CONTEXT_WINDOW;
   const fraction = win > 0 ? Math.min(1, Math.max(0, used / win)) : 0;
   const pct = Math.round(fraction * 100);
-  const tone = pct >= 90 ? "var(--danger)" : pct >= 75 ? "var(--warning)" : "var(--accent)";
+  const advice = contextAdvice(used);
+  // Colour follows the COST, then the window: an expensive context must not look
+  // calm just because it occupies a tenth of a 1M window.
+  const tone =
+    pct >= 90 || advice?.level === "urge"
+      ? "var(--danger)"
+      : pct >= 75 || advice?.level === "warn"
+        ? "var(--warning)"
+        : "var(--accent)";
   const r = 8;
   const circumference = 2 * Math.PI * r;
   const title = `Контекст диалога: ${fmtTokensK(used)} из ${fmtTokensK(win)} токенов`;
@@ -4723,7 +4747,15 @@ function ContextRing({
             <span>{fmtTokensK(used)} использовано</span>
             <span>{fmtTokensK(Math.max(0, win - used))} свободно</span>
           </div>
-          {pct >= 75 ? (
+          {/* The honest warning is about MONEY, not about a bar filling up: on a
+              1M-context model the bar is still short while every turn already
+              re-reads a fortune (see context-cost.ts). */}
+          {advice ? (
+            <p className={`ctx__warn ${advice.level === "urge" ? "ctx__warn--urge" : ""}`}>
+              <Icon name="dot" size={12} />
+              {advice.message}
+            </p>
+          ) : pct >= 75 ? (
             <p className="ctx__warn">
               <Icon name="dot" size={12} />
               Контекст заполняется — для новой темы лучше начать новую задачу.

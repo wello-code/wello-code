@@ -250,6 +250,30 @@ const SYSTEM_APPEND = `${ASK_SYSTEM_APPEND}\n\n${SUBAGENT_SYSTEM_APPEND}\n\n${WE
  */
 const ULTRA_SETTINGS: Settings = { ultracode: true, enableWorkflows: true };
 
+/**
+ * Auto-compaction budget, in tokens.
+ *
+ * The engine compacts when the conversation approaches the model's window. We
+ * hand 1M-class models the "[1m]" variant (see MODELS_1M) so their gauge is
+ * honest — but that also moved auto-compaction to ~1M tokens, i.e. effectively
+ * never. The bill for that is real: a heavy user spent 97.5% of a month's plan
+ * on re-read context, the per-turn read growing 90K → 679K while the number of
+ * turns stayed flat (owner analysis 2026-07-25).
+ *
+ * 200K is the window the engine's compaction is actually tuned for (it is the
+ * default Claude window), so this restores the behaviour every other Claude
+ * Code user gets, without giving up the honest 1M gauge. Compaction costs one
+ * summarisation turn and saves the cache-read of the whole history on every
+ * turn after it.
+ */
+const AUTO_COMPACT_WINDOW_TOKENS = 200_000;
+
+/** Settings every run carries (merged with the mode-specific ones). */
+const BASE_SETTINGS: Settings = {
+  autoCompactEnabled: true,
+  autoCompactWindow: AUTO_COMPACT_WINDOW_TOKENS,
+};
+
 /** The UI's effort scale: the engine's five levels plus our «Ультра» position. */
 export type WelloEffort = EffortLevel | "ultra";
 
@@ -927,7 +951,7 @@ export class SdkAgentSession {
       // permission allow-lists), so nothing project-level loads before the user
       // trusts the folder. The 'user' source (host ~/.claude) is never loaded.
       settingSources: req.trusted ? ["project", "local"] : [],
-      ...(ultra ? { settings: ULTRA_SETTINGS } : {}),
+      settings: ultra ? { ...BASE_SETTINGS, ...ULTRA_SETTINGS } : BASE_SETTINGS,
       systemPrompt: {
         type: "preset",
         preset: "claude_code",
