@@ -256,9 +256,9 @@ const ULTRA_SETTINGS: Settings = { ultracode: true, enableWorkflows: true };
  * The engine compacts when the conversation approaches the model's window. We
  * hand 1M-class models the "[1m]" variant (see MODELS_1M) so their gauge is
  * honest — but that also moved auto-compaction to ~1M tokens, i.e. effectively
- * never. The bill for that is real: a heavy user spent 97.5% of a month's plan
- * on re-read context, the per-turn read growing 90K → 679K while the number of
- * turns stayed flat (owner analysis 2026-07-25).
+ * never. The cost of that is real: in a long session the re-read context grows
+ * until it dominates the spend, climbing by an order of magnitude per turn while
+ * the number of turns stays flat.
  *
  * So the DEFAULT is 200K — the window the engine's compaction is tuned for.
  * It is only a default: the caller passes the user's own budget, and 0 turns
@@ -307,7 +307,7 @@ export function engineModelId(model: string): string {
  * NON-TERMINATING thinking phase whenever a large skill lands in context — the
  * default design skill is ~1.2k lines, and the model reasons over it without ever
  * stopping. The Wello upstream never streams thinking, so the UI just sat on
- * «Думает…» for 10+ minutes (owner-reported 2026-07-24; reproduced live: max/xhigh
+ * «Думает…» for 10+ minutes (reported 2026-07-24; reproduced live: max/xhigh
  * spiral, high and below terminate on their own in ~1 min). `effort` guides adaptive
  * thinking depth and OVERRIDES `maxThinkingTokens`, so the only way to bound these
  * levels is to drop `effort` and hand the engine an explicit `thinking` budget — a

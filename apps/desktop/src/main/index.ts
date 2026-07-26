@@ -9,6 +9,7 @@ import type {
   AppInfo,
   AppSettings,
   Connection,
+  HandoffOutcome,
   PersistedState,
   StartRunInput,
   WorkspaceInfo,
@@ -532,10 +533,21 @@ function registerIpc(): void {
   // --- Handoff note for "continue in a new chat" (current model, best-effort) --
   ipcMain.handle(
     "chat.handoff",
-    async (_e, transcript: string, model: string): Promise<string | null> => {
+    async (_e, transcript: string, model: string): Promise<HandoffOutcome> => {
       const key = await getApiKey();
-      if (!key || typeof transcript !== "string" || !transcript.trim()) return null;
-      return generateHandoff(key, transcript, typeof model === "string" && model ? model : "claude-sonnet-5");
+      if (!key) return { ok: false, reason: "no_key" };
+      if (typeof transcript !== "string" || !transcript.trim()) {
+        return { ok: false, reason: "no_content" };
+      }
+      const r = await generateHandoff(
+        key,
+        transcript,
+        typeof model === "string" && model ? model : "claude-sonnet-5",
+      );
+      // Every failure gets a line in the app log — the reason reaching the UI is
+      // for the user, this is for us when they send the log.
+      if (!r.ok) log.warn(`handoff failed: ${r.reason}${"status" in r && r.status ? ` (${r.status})` : ""}`);
+      return r;
     },
   );
 

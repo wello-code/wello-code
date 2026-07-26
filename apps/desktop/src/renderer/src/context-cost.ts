@@ -3,12 +3,12 @@
  *
  * The agent re-sends the whole conversation on every turn. That is normal — and
  * invisible, because it lands in the prompt cache rather than in anything the
- * user typed. The bill is not invisible: a heavy user burned 97.5% of a month's
- * plan on cached context (owner analysis 2026-07-25), with the per-turn read
- * growing 90K → 679K tokens while the number of turns stayed the same. Nothing
- * in the UI ever said so: the only nudge fired at 90% of the window, which on a
- * 1M-context model means 900K tokens — long past the point where every turn had
- * become expensive.
+ * user typed. The cost is not invisible: in a long session the re-read context
+ * grows until it dwarfs everything the user actually writes, and the per-turn
+ * spend climbs by an order of magnitude while the number of turns stays flat.
+ * Nothing in the UI ever said so: the only nudge fired at 90% of the window,
+ * which on a 1M-context model means 900K tokens — long past the point where
+ * every turn had become expensive.
  *
  * So the nudge is keyed on COST, not on how full the window looks:
  *   • WARN  — the context alone now costs more per turn than a fresh chat's

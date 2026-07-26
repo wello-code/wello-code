@@ -4,6 +4,7 @@ import type {
   AppInfo,
   AppSettings,
   Connection,
+  HandoffOutcome,
   StartRunInput,
   UpdateStatus,
   WelloApi,
@@ -91,7 +92,7 @@ const api: WelloApi = {
   exportChat: (name: string, content: string) =>
     ipcRenderer.invoke("chat.export", name, content) as Promise<boolean>,
   generateHandoff: (transcript: string, model: string) =>
-    ipcRenderer.invoke("chat.handoff", transcript, model) as Promise<string | null>,
+    ipcRenderer.invoke("chat.handoff", transcript, model) as Promise<HandoffOutcome>,
 
   startRun: (input: StartRunInput) => ipcRenderer.invoke("agent.start", input) as Promise<void>,
   cancelRun: (runId) => ipcRenderer.invoke("agent.cancel", runId) as Promise<void>,

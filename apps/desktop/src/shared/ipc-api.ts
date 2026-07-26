@@ -250,6 +250,18 @@ export interface ChangeSummary {
   deletions: number;
 }
 
+/**
+ * Result of a compaction attempt (main/wello-client.ts). It carries the REASON
+ * because this is the one model call the user triggers on purpose and waits for:
+ * "не удалось" with no cause and no retry is not an answer.
+ */
+export type HandoffOutcome =
+  | { ok: true; note: string }
+  | {
+      ok: false;
+      reason: "offline" | "timeout" | "quota" | "empty" | "server" | "no_key" | "no_content";
+    };
+
 export interface StartRunInput {
   taskId: string;
   runId: string;
@@ -522,7 +534,11 @@ export interface WelloApi {
   /** Save a Markdown transcript via the OS save dialog; true when written. */
   exportChat(name: string, content: string): Promise<boolean>;
   /** A handoff note compressing a chat, for «Продолжить в новом чате» (null on failure). */
-  generateHandoff(transcript: string, model: string): Promise<string | null>;
+  /**
+   * Summarise a chat into a handoff note (the compaction the user asks for).
+   * Reports WHY it failed — the UI names the cause and offers a retry.
+   */
+  generateHandoff(transcript: string, model: string): Promise<HandoffOutcome>;
 
   // Agent run lifecycle.
   startRun(input: StartRunInput): Promise<void>;

@@ -266,35 +266,82 @@ export async function generatePrText(
  * step. In the user's current chat model. Null on any failure — the caller then
  * opens the new chat without a preamble.
  */
+const HANDOFF_SYSTEM =
+  "Сожми диалог в передаточную записку для НОВОГО чата с тем же агентом, чтобы он " +
+  "продолжил работу без потери контекста. Пиши в markdown, кратко и по делу, на языке " +
+  "диалога, разделами: **Цель** (что делаем), **Сделано** (ключевые шаги/решения), " +
+  "**Состояние** (где остановились, важные файлы/факты), **Дальше** (следующий шаг). " +
+  "Без преамбул и без обращений — только записка.";
+
+/**
+ * Why this one call reports WHY it failed, unlike its neighbours: it is the only
+ * one the user triggers on purpose and waits for. A commit message that fails to
+ * generate leaves an empty field the user types into; a failed compaction leaves
+ * them with "не удалось" and nothing to do about it. Returning `null` for a dead
+ * network, an exhausted plan, a timeout and an empty answer alike is what made
+ * that unfixable from the outside (reported 2026-07-26).
+ */
+export type HandoffResult =
+  | { ok: true; note: string }
+  | {
+      ok: false;
+      reason: "offline" | "timeout" | "quota" | "empty" | "server" | "no_key";
+      status?: number;
+    };
+
 export async function generateHandoff(
   apiKey: string,
   transcript: string,
   model: string,
-): Promise<string | null> {
-  try {
-    const res = await fetch(`${CODE_BASE}/v1/messages`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        max_tokens: 700,
-        system:
-          "Сожми диалог в передаточную записку для НОВОГО чата с тем же агентом, чтобы он " +
-          "продолжил работу без потери контекста. Пиши в markdown, кратко и по делу, на языке " +
-          "диалога, разделами: **Цель** (что делаем), **Сделано** (ключевые шаги/решения), " +
-          "**Состояние** (где остановились, важные файлы/факты), **Дальше** (следующий шаг). " +
-          "Без преамбул и без обращений — только записка.",
-        messages: [{ role: "user", content: transcript }],
-      }),
-      signal: AbortSignal.timeout(45_000),
-    });
-    if (!res.ok) return null;
-    const body = (await res.json()) as { content?: { type: string; text?: string }[] };
+): Promise<HandoffResult> {
+  // 4000, not 700: at 700 the note itself hit the ceiling and came back cut in
+  // half (reproduced live — stop_reason "max_tokens" on an ordinary chat), and
+  // on a thinking model the hidden reasoning is billed to the SAME budget, so a
+  // tight ceiling can leave no visible text at all.
+  const call = async (maxTokens: number, noThinking: boolean): Promise<HandoffResult> => {
+    let res: Response;
+    try {
+      res = await fetch(`${CODE_BASE}/v1/messages`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          max_tokens: maxTokens,
+          ...(noThinking ? { thinking: { type: "disabled" } } : {}),
+          system: HANDOFF_SYSTEM,
+          messages: [{ role: "user", content: transcript }],
+        }),
+        signal: AbortSignal.timeout(90_000),
+      });
+    } catch (err) {
+      const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+      return { ok: false, reason: timedOut ? "timeout" : "offline" };
+    }
+    if (!res.ok) {
+      // Each of these sends the user somewhere different: top up, sign in again,
+      // or just retry. Collapsing them into one message is what made the old
+      // failure unactionable.
+      if (res.status === 402) return { ok: false, reason: "quota", status: res.status };
+      if (res.status === 401 || res.status === 403) {
+        return { ok: false, reason: "no_key", status: res.status };
+      }
+      return { ok: false, reason: "server", status: res.status };
+    }
+    let body: { content?: { type: string; text?: string }[] };
+    try {
+      body = (await res.json()) as typeof body;
+    } catch {
+      return { ok: false, reason: "server", status: res.status };
+    }
     const note = (body.content?.find((b) => b.type === "text")?.text ?? "").trim();
-    return note || null;
-  } catch {
-    return null;
-  }
+    return note ? { ok: true, note } : { ok: false, reason: "empty" };
+  };
+
+  const first = await call(4000, false);
+  // An answer with no text at all means the budget went to hidden reasoning —
+  // ask again with thinking off rather than telling the user "не получилось".
+  if (!first.ok && first.reason === "empty") return call(4000, true);
+  return first;
 }
 
 export async function generateTitle(apiKey: string, prompt: string): Promise<string | null> {

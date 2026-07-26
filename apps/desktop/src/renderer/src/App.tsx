@@ -39,7 +39,7 @@ import { BranchPopover } from "./BranchPopover";
 import { GithubConnectCard } from "./GitHubConnect";
 import { chatToMarkdown, transcriptForHandoff } from "./transcript";
 import { Modal, ModalCancel } from "./Modal";
-import type { UpdateStatus } from "../../shared/ipc-api";
+import type { HandoffOutcome, UpdateStatus } from "../../shared/ipc-api";
 import type { TimelineItem, UserAttachment } from "./agent-state";
 import { describeCurrentAction, toolActionLabel } from "./agent-state";
 import {
@@ -570,6 +570,13 @@ function Workspace({
   const [gateClosed, setGateClosed] = useState(false);
   /** "Я оплатил" is re-checking access against the gateway right now. */
   const [accessChecking, setAccessChecking] = useState(false);
+  // Compaction is a visible, cancellable-looking operation with its own modal:
+  // running → (done | failed with a reason the user can act on).
+  const [compacting, setCompacting] = useState<
+    | { state: "running"; taskId: string }
+    | { state: "failed"; taskId: string; reason: string }
+    | null
+  >(null);
   // Auto-update state, mirrored into the sidebar. It used to live ONLY inside
   // Settings → О приложении, so a user who never opened settings never learned
   // a release existed — the updater worked and nobody saw it.
@@ -1571,9 +1578,20 @@ function Workspace({
    * once the context gets expensive (see context-cost.ts).
    */
   const compactContext = async (task: TaskItem): Promise<void> => {
-    toast({ message: "Сжимаю контекст…" });
+    // Visible work, not a toast that flies away: this is one model call over the
+    // whole conversation and takes ten to twenty seconds, during which nothing
+    // on screen changes. A user who cannot tell whether it started presses the
+    // button again — and then gets a bare "не удалось" with no cause.
+    setCompacting({ state: "running", taskId: task.id });
     const transcript = transcriptForHandoff(task.agent.items);
-    const note = await window.wello.generateHandoff(transcript, model).catch(() => null);
+    const r = await window.wello
+      .generateHandoff(transcript, model)
+      .catch((): HandoffOutcome => ({ ok: false, reason: "offline" }));
+    if (!r.ok) {
+      setCompacting({ state: "failed", taskId: task.id, reason: r.reason });
+      return;
+    }
+    setCompacting(null);
     // Land on the home composer bound to the SAME folder, so the first send
     // creates the new chat there.
     switchTo(null);
@@ -1584,12 +1602,8 @@ function Workspace({
         name: task.workspaceName ?? baseName(task.workspacePath),
       });
     }
-    setPrompt(
-      note
-        ? `## Контекст предыдущего диалога\n\n${note}\n\n---\n\nПродолжаем: `
-        : "",
-    );
-    if (!note) toast({ message: "Не удалось подготовить контекст — начните новый чат вручную", tone: "danger" });
+    setPrompt(`## Контекст предыдущего диалога\n\n${r.note}\n\n---\n\nПродолжаем: `);
+    toast({ message: "Контекст сжат — продолжайте здесь", tone: "success" });
     caretToEnd();
     composerRef.current?.focus();
   };
@@ -3529,6 +3543,17 @@ ${t.workspaceName}` : t.title
           </div>
         </Modal>
       ) : null}
+      {compacting ? (
+        <CompactModal
+          state={compacting.state}
+          reason={compacting.state === "failed" ? compacting.reason : undefined}
+          onClose={() => setCompacting(null)}
+          onRetry={() => {
+            const task = state.tasks.find((t) => t.id === compacting.taskId);
+            if (task) void compactContext(task);
+          }}
+        />
+      ) : null}
       {bypassAsk ? (
         <ConfirmModal
           title="Включить полный доступ?"
@@ -3570,6 +3595,71 @@ ${t.workspaceName}` : t.title
         />
       ) : null}
     </div>
+  );
+}
+
+/** What each compaction failure means, in the user's terms, and what to do. */
+const COMPACT_FAIL: Record<string, string> = {
+  offline: "Нет связи с Wello. Проверьте интернет и попробуйте снова.",
+  timeout: "Модель не ответила вовремя. Попробуйте ещё раз — обычно проходит со второй попытки.",
+  quota: "Лимит подписки исчерпан, а баланса нет. Пополните счёт или дождитесь продления подписки.",
+  empty: "Модель вернула пустой ответ. Попробуйте ещё раз.",
+  server: "Сервис не смог подготовить выжимку. Попробуйте позже.",
+  no_key: "Аккаунт не подключён. Войдите в Wello в настройках.",
+  no_content: "В этом чате нечего сжимать — сообщений ещё нет.",
+};
+
+/**
+ * Compaction: a modal, not a toast. It runs 10–20 seconds against the model,
+ * and the whole point is that the user SEES it working; on failure it names the
+ * cause and offers the retry, instead of the old «не удалось» that left nothing
+ * to do (reported 2026-07-26).
+ */
+function CompactModal({
+  state,
+  reason,
+  onClose,
+  onRetry,
+}: {
+  state: "running" | "failed";
+  reason?: string;
+  onClose: () => void;
+  onRetry: () => void;
+}) {
+  const running = state === "running";
+  return (
+    <Modal title={running ? "Сжимаю контекст" : "Не удалось сжать контекст"} onClose={onClose}>
+      <p className="modal__body">
+        {running
+          ? "Готовлю короткую выжимку диалога — цель, что сделано, где остановились. " +
+            "Обычно занимает 10–20 секунд."
+          : (reason && COMPACT_FAIL[reason]) || COMPACT_FAIL.server}
+      </p>
+      {running ? (
+        <div className="compactbar" role="progressbar" aria-label="Идёт сжатие контекста">
+          <span className="compactbar__fill" />
+        </div>
+      ) : null}
+      <div className="modal__actions">
+        {running ? (
+          <button className="button ghost sm" onClick={onClose}>
+            Свернуть
+          </button>
+        ) : (
+          <>
+            <button className="button ghost sm" onClick={onClose}>
+              Закрыть
+            </button>
+            {/* No retry for the two failures a retry cannot fix. */}
+            {reason !== "no_key" && reason !== "no_content" ? (
+              <button className="button primary sm" autoFocus onClick={onRetry}>
+                Повторить
+              </button>
+            ) : null}
+          </>
+        )}
+      </div>
+    </Modal>
   );
 }
 
