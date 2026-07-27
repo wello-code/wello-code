@@ -93,6 +93,12 @@ linux:
   # PNG, not the .icns the other platforms use: Linux desktop entries want a
   # raster icon, and electron-builder derives the icon set from a 512×512 png.
   icon: build/icon.png
+  # A .deb has a required Maintainer field, and electron-builder will not guess
+  # it: without this the build stops with "Please specify author 'email'".
+  # Windows and macOS never needed it, which is why it only surfaced here.
+  maintainer: Wello <dev@wello.dev>
+  # Shown by apt/software centres. Also required for a well-formed .deb.
+  description: Десктопный агент-разработчик Wello Code — Claude в ваших проектах
   # Freedesktop menu category, so the app lands under "Development".
   category: Development
   synopsis: Wello Code — агент-разработчик на вашем компьютере
