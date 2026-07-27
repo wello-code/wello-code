@@ -44,6 +44,7 @@
     "vite": "^5.4.11"
   },
   "optionalDependencies": {
-    "@anthropic-ai/claude-agent-sdk-darwin-arm64": "0.3.207"
+    "@anthropic-ai/claude-agent-sdk-darwin-arm64": "0.3.207",
+    "@anthropic-ai/claude-agent-sdk-linux-x64": "0.3.207"
   }
 }

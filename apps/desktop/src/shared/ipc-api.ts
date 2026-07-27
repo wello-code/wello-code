@@ -23,6 +23,12 @@ export type UpdateStatus =
   | { state: "checking" }
   | { state: "none" }
   | { state: "available"; version: string }
+  /**
+   * A newer version exists, but this install cannot replace itself: a Linux .deb
+   * belongs to the package manager. We name the version and send the user to the
+   * download page instead of failing halfway through a download they can't apply.
+   */
+  | { state: "manual"; version: string }
   | { state: "downloading"; percent: number }
   | { state: "ready"; version: string }
   | { state: "error"; message: string }

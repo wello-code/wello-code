@@ -22,6 +22,9 @@ import { toast } from "./Toaster";
 /* ------------------------------- Theme ---------------------------------- */
 
 export type ThemeId = "dark" | "dim" | "light" | "system";
+/** Where a build that cannot update itself (Linux .deb) sends the user. */
+const RELEASES_URL = "https://wello.dev/code";
+
 const THEME_LS_KEY = "wello-code-theme";
 const THEMES: { id: ThemeId; label: string; hint: string }[] = [
   { id: "dark", label: "Тёмная", hint: "Стандартная тема" },
@@ -508,7 +511,7 @@ export function SettingsView({
 export function updateRow(status: UpdateStatus): {
   desc: string;
   label?: string;
-  act?: "check" | "download" | "install";
+  act?: "check" | "download" | "install" | "open";
 } {
   switch (status.state) {
     case "unsupported":
@@ -519,6 +522,14 @@ export function updateRow(status: UpdateStatus): {
       return { desc: "Установлена последняя версия", label: "Проверить снова", act: "check" };
     case "available":
       return { desc: `Доступна версия ${status.version}`, label: "Скачать", act: "download" };
+    case "manual":
+      // A .deb belongs to the package manager: we can see the new version but not
+      // install it, so the button hands the user the file instead of pretending.
+      return {
+        desc: `Доступна версия ${status.version} — обновите пакет вручную`,
+        label: "Открыть страницу загрузки",
+        act: "open",
+      };
     case "downloading":
       return { desc: `Загрузка… ${status.percent}%` };
     case "ready":
@@ -654,6 +665,7 @@ function GeneralPage({
                     if (act === "check") void window.wello.checkForUpdates();
                     else if (act === "download") void window.wello.downloadUpdate();
                     else if (act === "install") void window.wello.installUpdate();
+                    else if (act === "open") void window.wello.openExternal(RELEASES_URL);
                   }}
                 >
                   {updateRow(update).label}

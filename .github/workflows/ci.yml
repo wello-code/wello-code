@@ -51,3 +51,31 @@ jobs:
             libcups2 libgtk-3-0 libgbm1 libasound2t64
       - name: Run packaged-app smoke under xvfb
         run: xvfb-run -a pnpm --filter @wello-code/desktop test:e2e
+
+  linux-package:
+    name: pack the Linux build (no publish)
+    # Only on main: packing takes minutes and the answer it gives ("does the
+    # Linux installer still assemble") does not change per pull request.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @wello-code/desktop build
+      # The same command the release runs, minus publishing. Catches a broken
+      # Linux target on the commit that broke it rather than on release day —
+      # and the artifact below is a build people can try before a release exists.
+      - run: pnpm --filter @wello-code/desktop exec electron-builder --linux --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wello-code-linux
+          path: |
+            apps/desktop/release/installer/*.AppImage
+            apps/desktop/release/installer/*.deb
+          retention-days: 14
+          if-no-files-found: error

@@ -12,7 +12,7 @@
 
 </div>
 
-> **In English:** Wello Code is an open-source desktop coding agent for **Windows and macOS (Apple Silicon only)**, powered by a [Wello](https://wello.dev) account. The interface is currently Russian only, so this README is written in Russian.
+> **In English:** Wello Code is an open-source desktop coding agent for **Windows, macOS (Apple Silicon only) and Linux**, powered by a [Wello](https://wello.dev) account. The interface is currently Russian only, so this README is written in Russian.
 
 ---
 
@@ -65,13 +65,18 @@
 > «Открыть» → «Открыть»** (или **Системные настройки → Конфиденциальность и безопасность →
 > «Открыть всё равно»**). Это нужно сделать один раз.
 
+> **Linux.** Два варианта: **AppImage** ничего не устанавливает — сделайте файл исполняемым
+> (`chmod +x WelloCode-*.AppImage`) и запустите; **.deb** ставится пакетным менеджером
+> (`sudo apt install ./WelloCode-*.deb`). Обновляться на месте умеет только AppImage — в
+> сборке из `.deb` приложение сообщит о новой версии и предложит скачать её.
+
 Обновления приходят автоматически и скачиваются частями: приложение сравнивает старую и
 новую сборку и тянет только изменившиеся куски, поэтому обычное обновление весит пару
 мегабайт, а не всю сборку целиком. Ничего не устанавливается без вашего подтверждения.
 
 ## Что нужно
 
-- **Windows 10 или новее** (64 бита), либо **macOS 11 Big Sur и новее** — **только на чипах Apple (M1 и новее)**. На Mac с процессором Intel приложение не запустится: сборки под Intel нет.
+- **Windows 10 или новее** (64 бита), **macOS 11 Big Sur и новее** — **только на чипах Apple (M1 и новее)**; на Mac с процессором Intel приложение не запустится, сборки под Intel нет — либо **Linux x64** (glibc 2.28+, то есть Ubuntu 20.04 и новее).
 - **Аккаунт [Wello](https://wello.dev)** с подпиской Pro или Max. Без подписки приложение
   работает с баланса по факту использования.
 - Около 550 МБ на диске после установки.
@@ -103,7 +108,9 @@ pnpm --filter @wello-code/desktop dist:win
 
 Готовый инсталлятор появится в `apps/desktop/release/installer/`.
 
-Сборка под macOS выполняется в CI (`.github/workflows/release.yml`) — локального `dist:mac` нет.
+Сборки под macOS и Linux выполняются в CI (`.github/workflows/release.yml`) — локальных
+`dist:mac` / `dist:linux` нет. Линуксовый пакет собирается и на каждый push в `main`
+(`.github/workflows/ci.yml`), артефакт лежит в результатах прогона.
 
 ## Как устроено
 

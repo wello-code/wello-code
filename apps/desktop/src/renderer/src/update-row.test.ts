@@ -22,6 +22,14 @@ describe("updateRow", () => {
     expect(row.act).toBe("download");
   });
 
+  it("offers the download page — not a doomed download — when the build can't self-update", () => {
+    // Linux .deb: dpkg owns the files, so electron-updater would fail partway.
+    const row = updateRow({ state: "manual", version: "0.2.0" });
+    expect(row.desc).toContain("0.2.0");
+    expect(row.desc).toContain("вручную");
+    expect(row.act).toBe("open");
+  });
+
   it("offers the restart only once the download is ready", () => {
     const row = updateRow({ state: "ready", version: "0.2.0" });
     expect(row.act).toBe("install");

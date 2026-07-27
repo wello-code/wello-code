@@ -29,6 +29,18 @@ type Emit = (status: UpdateStatus) => void;
 let emit: Emit = () => {};
 let latest: UpdateStatus = { state: "idle" };
 
+/**
+ * Can this install replace itself?
+ *
+ * Windows (NSIS), macOS (dmg/zip) and Linux AppImage can. A Linux .deb cannot:
+ * the files belong to dpkg, and electron-updater fails partway through with a
+ * message nobody can act on. An AppImage run announces itself through the
+ * APPIMAGE environment variable, which is how we tell the two apart.
+ */
+function canSelfUpdate(): boolean {
+  return process.platform !== "linux" || Boolean(process.env.APPIMAGE);
+}
+
 /** Last known status, so a renderer that mounts late still sees it. */
 export function updateStatus(): UpdateStatus {
   return latest;
@@ -71,7 +83,13 @@ export function initUpdater(send: Emit): void {
   (autoUpdater as NsisUpdater).verifyUpdateCodeSignature = () => Promise.resolve(null);
 
   autoUpdater.on("checking-for-update", () => set({ state: "checking" }));
-  autoUpdater.on("update-available", (info) => set({ state: "available", version: info.version }));
+  autoUpdater.on("update-available", (info) =>
+    set(
+      canSelfUpdate()
+        ? { state: "available", version: info.version }
+        : { state: "manual", version: info.version },
+    ),
+  );
   autoUpdater.on("update-not-available", () => set({ state: "none" }));
   autoUpdater.on("download-progress", (p) =>
     set({ state: "downloading", percent: Math.round(p.percent) }),
@@ -99,6 +117,9 @@ export async function checkForUpdates(): Promise<void> {
 /** Pull the update the user just agreed to. */
 export async function downloadUpdate(): Promise<void> {
   if (!app.isPackaged) return;
+  // A .deb install has nothing to download INTO; the UI offers the download page
+  // instead, and this guard keeps an old renderer from starting a doomed one.
+  if (!canSelfUpdate()) return;
   try {
     await autoUpdater.downloadUpdate();
   } catch (err) {

@@ -100,6 +100,9 @@ importers:
       '@anthropic-ai/claude-agent-sdk-darwin-arm64':
         specifier: 0.3.207
         version: 0.3.207
+      '@anthropic-ai/claude-agent-sdk-linux-x64':
+        specifier: 0.3.207
+        version: 0.3.207
 
   packages/agent-core:
     dependencies:

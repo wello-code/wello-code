@@ -79,6 +79,34 @@ mac:
     - target: zip
       arch: [arm64]
 
+# Linux is packed by electron-builder itself, like macOS and unlike Windows: the
+# engine's platform binary is declared as an optionalDependency of this package,
+# so pnpm installs it on a Linux runner (npm's own `os` field skips it everywhere
+# else) and the normal dependency walk finds it under node_modules/@anthropic-ai.
+#
+# Two targets, because Linux users do not agree on one:
+#   • AppImage — runs on any distro without installing anything, and is the only
+#     Linux format electron-updater knows how to update in place;
+#   • deb — for people who expect apt to own their applications. It does NOT
+#     auto-update; the app tells them a new version exists and links the download.
+linux:
+  # PNG, not the .icns the other platforms use: Linux desktop entries want a
+  # raster icon, and electron-builder derives the icon set from a 512×512 png.
+  icon: build/icon.png
+  # Freedesktop menu category, so the app lands under "Development".
+  category: Development
+  synopsis: Wello Code — агент-разработчик на вашем компьютере
+  desktop:
+    entry:
+      # Wayland sessions otherwise show a generic icon and a wrong window class.
+      StartupWMClass: Wello Code
+  artifactName: WelloCode-${version}-${arch}.${ext}
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+
 nsis:
   # A wizard, not a one-click surprise install: people downloading an unsigned
   # binary have just clicked through a SmartScreen warning, so hiding the
