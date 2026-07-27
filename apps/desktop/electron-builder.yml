@@ -99,13 +99,22 @@ linux:
   maintainer: Wello <dev@wello.dev>
   # Shown by apt/software centres. Also required for a well-formed .deb.
   description: Десктопный агент-разработчик Wello Code — Claude в ваших проектах
+  # The binary's name on disk. Without this electron-builder derives it from the
+  # package name — "@wello-code/desktop" becomes "@wello-codedesktop", and
+  # AppImage refuses the "@": "executableName contains characters that cannot be
+  # safely used in file paths". Windows and macOS name the binary after
+  # productName, which is why only Linux hit it. Lowercase-with-hyphen is also
+  # the convention for a command on PATH.
+  executableName: wello-code
   # Freedesktop menu category, so the app lands under "Development".
   category: Development
   synopsis: Wello Code — агент-разработчик на вашем компьютере
   desktop:
     entry:
-      # Wayland sessions otherwise show a generic icon and a wrong window class.
-      StartupWMClass: Wello Code
+      # Must match executableName: Electron sets WM_CLASS from the binary name,
+      # and a desktop entry that claims a different class leaves the running
+      # window unlinked (generic icon, no grouping) on Wayland and GNOME.
+      StartupWMClass: wello-code
   artifactName: WelloCode-${version}-${arch}.${ext}
   target:
     - target: AppImage
