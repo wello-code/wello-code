@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -483,6 +484,8 @@ function initialEffort(): Effort {
 /** Below this the titlebar balance turns amber — a gentle "top up soon" cue. */
 const LOW_BALANCE_CENTS = 100;
 const BILLING_URL = "https://wello.dev/settings/billing";
+/** Download page — for a build that cannot update itself (Linux .deb). */
+const DOWNLOAD_URL = "https://wello.dev/code";
 
 /** Human plan names for the subscription chip (fall back to «Подписка»). */
 const PLAN_LABELS: Record<string, string> = {
@@ -868,11 +871,27 @@ function Workspace({
     pinnedToBottom.current = true;
     setFarFromBottom(false);
   };
+  // Coalesced to one scroll per animation frame. Reading scrollHeight forces a
+  // layout, and this effect fires on every streamed chunk — dozens of forced
+  // layouts a second on top of the render itself. One per frame is all the eye
+  // can see anyway.
+  const followFrame = useRef(0);
   useEffect(() => {
-    if (pinnedToBottom.current) {
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-    }
+    if (!pinnedToBottom.current) return;
+    if (followFrame.current) return;
+    followFrame.current = requestAnimationFrame(() => {
+      followFrame.current = 0;
+      if (pinnedToBottom.current && scrollRef.current) {
+        scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight });
+      }
+    });
   }, [activeTask?.agent.items, pending, question, ghConnect, queue.length]);
+  useEffect(
+    () => () => {
+      if (followFrame.current) cancelAnimationFrame(followFrame.current);
+    },
+    [],
+  );
   useEffect(() => {
     // Switching tasks always lands at the latest message.
     pinnedToBottom.current = true;
@@ -1226,13 +1245,16 @@ function Workspace({
    *  Any panel action taken from the settings screen first returns to the chat —
    *  the dock is only VISUALLY hidden there, so the toggle must land somewhere
    *  the user can see. */
-  const openPanel = (id: PanelId): void => {
+  // Stable identity (only setState calls inside): it travels down into the
+  // memoized timeline rows, where a fresh function each render would undo the
+  // memoization.
+  const openPanel = useCallback((id: PanelId): void => {
     setSettingsOpen(false);
     setPanels((p) => (p.includes(id) ? p : [...p, id]));
     // Opening something new while another tile is maximized would land it
     // invisible — level the tiles instead.
     setMaximizedPanel((m) => (m !== null && m !== id ? null : m));
-  };
+  }, []);
 
   const closePanel = (id: PanelId): void => {
     setPanels((p) => p.filter((x) => x !== id));
@@ -1249,7 +1271,7 @@ function Workspace({
     setMaximizedPanel((m) => (m === id ? null : id));
   };
 
-  const openFileTab = (path: string): void => openPanel(`file:${path}`);
+  const openFileTab = useCallback((path: string): void => openPanel(`file:${path}`), [openPanel]);
 
   const openFolder = async (): Promise<void> => {
     const ws = await window.wello.openWorkspace();
@@ -1529,6 +1551,25 @@ function Workspace({
     caretToEnd();
     composerRef.current?.focus();
   };
+
+  /**
+   * Stable handles for the timeline's row actions.
+   *
+   * `startEditTurn` closes over the active task and the queue, both of which
+   * change on every streamed chunk, so it cannot be a useCallback with honest
+   * dependencies AND stay stable. The ref indirection (the same trick
+   * `returnQueueRef` above uses) gives the rows one unchanging function that
+   * always calls the latest implementation — which is what lets the memoized
+   * rows skip re-rendering while an answer streams.
+   */
+  const startEditTurnRef = useRef(startEditTurn);
+  startEditTurnRef.current = startEditTurn;
+  const onEditTurn = useCallback((itemId: string): void => {
+    startEditTurnRef.current(itemId);
+  }, []);
+  const onRewindTurn = useCallback((itemId: string, runId: string): void => {
+    setRewindAsk({ itemId, runId });
+  }, []);
 
   const cancelEditTurn = (): void => {
     setEditing(null);
@@ -2580,7 +2621,11 @@ ${t.workspaceName}` : t.title
               row, because it is the one thing in the sidebar that is about the
               APP rather than the work — and because Settings, where this used to
               be the only mention, is exactly where people do not look. */}
-          {!updateHidden && (update.state === "available" || update.state === "ready" || update.state === "downloading") ? (
+          {!updateHidden &&
+          (update.state === "available" ||
+            update.state === "manual" ||
+            update.state === "ready" ||
+            update.state === "downloading") ? (
             <div className="updbar">
               <span className="updbar__dot" aria-hidden />
               <span className="updbar__text">
@@ -2593,10 +2638,16 @@ ${t.workspaceName}` : t.title
                   className="button ghost sm updbar__action"
                   onClick={() => {
                     if (update.state === "ready") void window.wello.installUpdate();
+                    // A .deb cannot replace itself — hand over the download page.
+                    else if (update.state === "manual") void window.wello.openExternal(DOWNLOAD_URL);
                     else void window.wello.downloadUpdate();
                   }}
                 >
-                  {update.state === "ready" ? "Перезапустить" : "Обновить"}
+                  {update.state === "ready"
+                    ? "Перезапустить"
+                    : update.state === "manual"
+                      ? "Скачать"
+                      : "Обновить"}
                 </button>
               )}
               <button
@@ -2835,8 +2886,8 @@ ${t.workspaceName}` : t.title
               onOpenFile={openFileTab}
               onRetry={() => void retryLast()}
               onTopUp={() => void window.wello.openExternal(BILLING_URL)}
-              onEditTurn={startEditTurn}
-              onRewindTurn={(itemId, runId) => setRewindAsk({ itemId, runId })}
+              onEditTurn={onEditTurn}
+              onRewindTurn={onRewindTurn}
             />
           ) : null}
           {/* Queued type-ahead: a tight stack of muted bubbles at the thread's
@@ -4460,7 +4511,12 @@ function Timeline({
   const { items, running, elapsedMs, startedAt } = task.agent;
   // The open image + its message siblings, so the lightbox can page between them.
   const [lightbox, setLightbox] = useState<{ paths: string[]; index: number } | null>(null);
-  const openImage = (paths: string[], index: number): void => setLightbox({ paths, index });
+  // Stable across renders so the memoized rows below actually skip: a fresh
+  // arrow function here would change every row's props on every stream chunk.
+  const openImage = useCallback(
+    (paths: string[], index: number): void => setLightbox({ paths, index }),
+    [],
+  );
   const lastUserIdx = items.reduce((acc, it, idx) => (it.kind === "user" ? idx : acc), -1);
   const toolsAfterLastUser = items.some((it, idx) => idx > lastUserIdx && it.kind === "tool");
   const nodes: ReactNode[] = [];
@@ -4491,16 +4547,19 @@ function Timeline({
         !running &&
         Boolean(it.text.trim()) &&
         (it.attachments?.length ?? 0) === 0;
-      // Rewind needs the turn's checkpoint label (its run id).
-      const rewindId = it.kind === "user" && !running ? it.runId : undefined;
+      // Rewind needs the turn's checkpoint label (its run id), which Item reads
+      // off the item itself; here we only decide whether the action is offered.
+      const rewindable = it.kind === "user" && !running && Boolean(it.runId);
       nodes.push(
         <Item
           key={it.id}
           item={it}
           onOpenImage={openImage}
           onOpenFile={onOpenFile}
-          onEdit={editable ? () => onEditTurn(it.id) : undefined}
-          onRewind={rewindId ? () => onRewindTurn(it.id, rewindId) : undefined}
+          // Passing the CALLBACK, not a closure over the item: these stay the
+          // same objects between renders, so an untouched row skips re-rendering.
+          onEdit={editable ? onEditTurn : undefined}
+          onRewind={rewindable ? onRewindTurn : undefined}
         />,
       );
       // The finished turn ran with no tool steps: show its duration right after the ask.
@@ -4579,7 +4638,21 @@ function LiveElapsed({ startedAt }: { startedAt: string | null }) {
   return <>{fmtElapsed(now - base.current)}</>;
 }
 
-function Activity({
+/** Shallow, by identity: the reducer replaces only the item that changed. */
+function sameTools(a: ToolItem[], b: ToolItem[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/**
+ * A run of tool steps, folded into one strip.
+ *
+ * Memoized WITH a comparator, unlike the message rows: the timeline rebuilds
+ * these groups as fresh arrays on every render, so the default identity check
+ * would never match even when nothing about the group changed.
+ */
+const Activity = memo(function Activity({
   tools,
   running,
   startedAt,
@@ -4641,9 +4714,26 @@ function Activity({
       </div>
     </details>
   );
-}
+}, (prev, next) =>
+  prev.running === next.running &&
+  prev.startedAt === next.startedAt &&
+  prev.elapsedMs === next.elapsedMs &&
+  sameTools(prev.tools, next.tools));
 
-function Item({
+/**
+ * One entry in the thread.
+ *
+ * MEMOIZED. A streaming answer updates state on every chunk, and without this
+ * every earlier message in the conversation re-rendered — markdown re-parsed,
+ * code re-highlighted — dozens of times a second. On a 20-message thread that is
+ * more work than a frame can hold, which is what froze the window.
+ *
+ * For memo to actually bite, every prop has to be referentially stable, which is
+ * why the callbacks take the item id instead of being per-item closures: an
+ * inline `() => onEditTurn(it.id)` is a new function on every render and would
+ * defeat the comparison for all of them.
+ */
+const Item = memo(function Item({
   item,
   onOpenImage,
   onOpenFile,
@@ -4654,22 +4744,25 @@ function Item({
   onOpenImage: (paths: string[], index: number) => void;
   onOpenFile: (path: string) => void;
   /** Present on editable user turns (no run in flight, no file attachments). */
-  onEdit?: () => void;
-  /** Present on user turns with a checkpoint (rewind restores files). */
-  onRewind?: () => void;
+  onEdit?: (itemId: string) => void;
+  /** Present on user turns with a checkpoint; carries the run id to rewind to. */
+  onRewind?: (itemId: string, runId: string) => void;
 }) {
   switch (item.kind) {
-    case "user":
+    case "user": {
+      const id = item.id;
+      const runId = item.runId;
       return (
         <UserBubble
           text={item.text}
           images={item.images}
           attachments={item.attachments}
           onOpenImage={onOpenImage}
-          onEdit={onEdit}
-          onRewind={onRewind}
+          onEdit={onEdit ? () => onEdit(id) : undefined}
+          onRewind={onRewind && runId ? () => onRewind(id, runId) : undefined}
         />
       );
+    }
     case "message":
       return <AssistantMessage text={item.text} onOpenFile={onOpenFile} />;
     case "plan":
@@ -4692,10 +4785,11 @@ function Item({
     case "tool":
       return null;
   }
-}
+});
 
-/** An assistant reply: the markdown plus a copy action revealed on hover/focus. */
-function AssistantMessage({
+/** An assistant reply: the markdown plus a copy action revealed on hover/focus.
+ *  Memoized: see the note on {@link Item}. */
+const AssistantMessage = memo(function AssistantMessage({
   text,
   onOpenFile,
 }: {
@@ -4726,7 +4820,7 @@ function AssistantMessage({
       ) : null}
     </div>
   );
-}
+});
 
 function UserBubble({
   text,

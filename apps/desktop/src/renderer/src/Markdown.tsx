@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { highlight, resolveLanguage } from "./highlight";
@@ -129,9 +129,24 @@ function buildComponents(onOpenFile?: (path: string) => void): Components {
   };
 }
 
-/** Renders agent output as GitHub-flavored markdown (prose, code, lists, links).
- *  When `onOpenFile` is given, file mentions become clickable inspector links. */
-export function Markdown({ text, onOpenFile }: { text: string; onOpenFile?: (path: string) => void }) {
+/**
+ * Renders agent output as GitHub-flavored markdown (prose, code, lists, links).
+ * When `onOpenFile` is given, file mentions become clickable inspector links.
+ *
+ * MEMOIZED, and that is load-bearing rather than a micro-optimisation: parsing
+ * markdown is the most expensive thing the chat does, and a streaming reply
+ * re-renders the whole thread many times a second. Without this, every finished
+ * message in a long conversation was re-parsed on every frame of the answer
+ * being typed — the "20+ сообщений и всё лагает" report. `onOpenFile` must stay
+ * referentially stable for this to bite; the callers hold it in a ref/useCallback.
+ */
+export const Markdown = memo(function Markdown({
+  text,
+  onOpenFile,
+}: {
+  text: string;
+  onOpenFile?: (path: string) => void;
+}) {
   const components = useMemo(() => buildComponents(onOpenFile), [onOpenFile]);
   return (
     <div className="md">
@@ -140,4 +155,4 @@ export function Markdown({ text, onOpenFile }: { text: string; onOpenFile?: (pat
       </ReactMarkdown>
     </div>
   );
-}
+});

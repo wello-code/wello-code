@@ -102,12 +102,63 @@ export function languageForPath(path: string): string | null {
   return resolveLanguage(path.slice(dot + 1));
 }
 
+/**
+ * Highlighting is pure — same source and language, same HTML — but it is not
+ * cheap, and the chat asks for the SAME answer over and over: every keystroke of
+ * a streaming reply re-renders the thread, and each code block in it is
+ * re-highlighted from scratch. Measured on a 20-message thread that is ~18 ms
+ * per frame, more than a 60 fps frame budget, before markdown parsing or DOM
+ * work — which is exactly what "Wello Code (Не отвечает)" looked like.
+ *
+ * A small LRU makes the repeat free. Bounded by entry count AND by total
+ * characters so a session full of large files cannot grow it without limit; the
+ * oldest entry goes first (Map preserves insertion order).
+ */
+const CACHE_MAX_ENTRIES = 400;
+const CACHE_MAX_CHARS = 4_000_000;
+/** Blocks bigger than this are rare, and caching them costs more than it saves. */
+const CACHE_MAX_ENTRY_CHARS = 200_000;
+
+const cache = new Map<string, string>();
+let cachedChars = 0;
+
+function remember(key: string, html: string): void {
+  if (html.length > CACHE_MAX_ENTRY_CHARS) return;
+  cache.set(key, html);
+  cachedChars += html.length;
+  while (cache.size > CACHE_MAX_ENTRIES || cachedChars > CACHE_MAX_CHARS) {
+    const oldest = cache.keys().next();
+    if (oldest.done) break;
+    cachedChars -= cache.get(oldest.value)?.length ?? 0;
+    cache.delete(oldest.value);
+  }
+}
+
 /** Highlight `code` as `lang`, returning trusted HTML — or null when unknown/failed. */
 export function highlight(code: string, lang: string | null): string | null {
   if (!lang) return null;
+  // NUL separates the parts because it can occur in neither. Written as an
+  // ESCAPE rather than as the byte itself: a literal control character in the
+  // source makes git treat the whole file as binary — no diffs, nothing to review.
+  const key = `${lang}\u0000${code}`;
+  const hit = cache.get(key);
+  if (hit !== undefined) {
+    // Refresh recency: re-inserting moves the key to the end of the Map order.
+    cache.delete(key);
+    cache.set(key, hit);
+    return hit;
+  }
   try {
-    return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
+    const html = hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
+    remember(key, html);
+    return html;
   } catch {
     return null;
   }
+}
+
+/** Test hook: forget everything (the cache is otherwise process-wide). */
+export function clearHighlightCache(): void {
+  cache.clear();
+  cachedChars = 0;
 }
