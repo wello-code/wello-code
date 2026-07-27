@@ -38,6 +38,15 @@ let latest: UpdateStatus = { state: "idle" };
  * APPIMAGE environment variable, which is how we tell the two apart.
  */
 function canSelfUpdate(): boolean {
+  // macOS cannot either, for a different reason. Squirrel checks that the
+  // downloaded app satisfies the RUNNING app's designated code requirement, and
+  // our mac build carries an ad-hoc signature (electron-builder `identity: "-"`),
+  // which no requirement can be pinned to. The install therefore always ends in
+  // "Code signature at URL … did not pass validation", with a Retry button that
+  // can only fail again. Until there is a Developer ID certificate to sign with,
+  // mac takes the same honest path as a .deb: say a version is out and open the
+  // download page. Flip this back the moment real signing lands.
+  if (process.platform === "darwin") return false;
   return process.platform !== "linux" || Boolean(process.env.APPIMAGE);
 }
 
