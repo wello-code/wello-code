@@ -523,10 +523,13 @@ export function updateRow(status: UpdateStatus): {
     case "available":
       return { desc: `Доступна версия ${status.version}`, label: "Скачать", act: "download" };
     case "manual":
-      // A .deb belongs to the package manager: we can see the new version but not
-      // install it, so the button hands the user the file instead of pretending.
+      // Two different reasons land here, and the wording has to fit both: a .deb
+      // belongs to the package manager, and a mac build signed ad-hoc can never
+      // satisfy the code requirement Squirrel checks an update against. Either
+      // way we can SEE the new version but not install it, so the button hands
+      // over the download instead of pretending.
       return {
-        desc: `Доступна версия ${status.version} — обновите пакет вручную`,
+        desc: `Доступна версия ${status.version} — скачайте и установите её вручную`,
         label: "Открыть страницу загрузки",
         act: "open",
       };
