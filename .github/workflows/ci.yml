@@ -70,7 +70,18 @@ jobs:
       # The same command the release runs, minus publishing. Catches a broken
       # Linux target on the commit that broke it rather than on release day —
       # and the artifact below is a build people can try before a release exists.
-      - run: pnpm --filter @wello-code/desktop exec electron-builder --linux --publish never
+      #
+      # The failure path echoes the tail of the output as a workflow ERROR
+      # annotation: annotations are readable without repository admin rights,
+      # while raw job logs are not. When this broke the first time, "Process
+      # completed with exit code 1" was all anyone outside the org could see.
+      - name: Pack AppImage + deb
+        run: |
+          set -o pipefail
+          if ! pnpm --filter @wello-code/desktop exec electron-builder --linux --publish never 2>&1 | tee /tmp/electron-builder.log; then
+            echo "::error title=electron-builder --linux failed::$(tail -c 1200 /tmp/electron-builder.log | tr '\n' ' ')"
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: wello-code-linux
