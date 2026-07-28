@@ -392,6 +392,9 @@ export function workflowProgressAgents(raw: unknown): WorkflowAgentProgress[] | 
 export interface WelloConnection {
   apiKey: string;
   baseUrl?: string;
+  /** This build's version, so the gateway can tell our app from any other client
+   *  pointed at the same endpoint (and see who is still on an old build). */
+  appVersion?: string;
 }
 
 export interface SdkRunRequest {
@@ -631,6 +634,13 @@ export class SdkAgentSession {
   }
 
   private buildEnv(model: string, gitEnv?: Record<string, string>): Record<string, string | undefined> {
+    // The engine writes its own User-Agent, so on the gateway a run of ours is
+    // indistinguishable from anyone pointing the upstream CLI at the same base
+    // URL. This header is how the app names itself; the version tells which
+    // build a request came from. `x-wello-client` is the gateway's own contract.
+    const label = `wello-code/${this.conn.appVersion ?? "dev"}`;
+    const ownHeader = `x-wello-client: ${label}`;
+    const existingHeaders = process.env.ANTHROPIC_CUSTOM_HEADERS?.trim();
     return {
       ...process.env,
       // The GitHub credential bridge (github.com-scoped helper + token) — every
@@ -645,7 +655,9 @@ export class SdkAgentSession {
       // model the user picked — built-ins inherit anyway, this closes the gaps
       // (per-invocation overrides, engine defaults on unknown gateway model ids).
       CLAUDE_CODE_SUBAGENT_MODEL: model,
-      CLAUDE_AGENT_SDK_CLIENT_APP: "wello-code/0.0.0",
+      CLAUDE_AGENT_SDK_CLIENT_APP: label,
+      // Keep any header the user configured themselves; ours is appended.
+      ANTHROPIC_CUSTOM_HEADERS: existingHeaders ? `${existingHeaders}\n${ownHeader}` : ownHeader,
     };
   }
 

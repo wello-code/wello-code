@@ -4,16 +4,31 @@
  * through the /code API, which bills the user's SUBSCRIPTION first and spills to
  * the PAYG balance — /code/v1/access is the billing status for the titlebar chip.
  */
+import { app } from "electron";
+
 const BASE_URL = "https://api.wello.dev";
 /** The /code API base — subscription-first billing for the coding agent. */
 const CODE_BASE = `${BASE_URL}/code`;
+
+/**
+ * Auth plus the app's own name for the gateway's request log. Without the header
+ * every call looks like an anonymous script against a public API; with it the
+ * operator sees which build made the call.
+ */
+function authHeaders(apiKey: string, json = false): Record<string, string> {
+  return {
+    Authorization: `Bearer ${apiKey}`,
+    "x-wello-client": `wello-code/${app.getVersion()}`,
+    ...(json ? { "Content-Type": "application/json" } : {}),
+  };
+}
 
 /** Best-effort self-revoke on sign-out, so the machine keeps no live credential. */
 export async function revokeCurrentKey(apiKey: string): Promise<void> {
   try {
     await fetch(`${CODE_BASE}/v1/key`, {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${apiKey}` },
+      headers: authHeaders(apiKey),
       signal: AbortSignal.timeout(10_000),
     });
   } catch {
@@ -28,7 +43,7 @@ export async function setPaygOverflow(apiKey: string, enabled: boolean): Promise
   try {
     res = await fetch(`${CODE_BASE}/v1/overflow`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      headers: authHeaders(apiKey, true),
       body: JSON.stringify({ enabled }),
       signal: AbortSignal.timeout(15_000),
     });
@@ -73,7 +88,7 @@ export async function fetchBalance(apiKey: string): Promise<BalanceInfo> {
   let res: Response;
   try {
     res = await fetch(`${BASE_URL}/v1/balance`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
+      headers: authHeaders(apiKey),
       signal: AbortSignal.timeout(15_000),
     });
   } catch {
@@ -100,7 +115,7 @@ export async function fetchAccess(apiKey: string): Promise<AccessInfo> {
   let res: Response;
   try {
     res = await fetch(`${CODE_BASE}/v1/access`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
+      headers: authHeaders(apiKey),
       signal: AbortSignal.timeout(15_000),
     });
   } catch {
@@ -183,7 +198,7 @@ export async function generateCommitMessage(
   try {
     const res = await fetch(`${CODE_BASE}/v1/messages`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      headers: authHeaders(apiKey, true),
       body: JSON.stringify({
         model,
         max_tokens: 60,
@@ -232,7 +247,7 @@ export async function generatePrText(
   try {
     const res = await fetch(`${CODE_BASE}/v1/messages`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      headers: authHeaders(apiKey, true),
       body: JSON.stringify({
         model,
         max_tokens: 700,
@@ -303,7 +318,7 @@ export async function generateHandoff(
     try {
       res = await fetch(`${CODE_BASE}/v1/messages`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        headers: authHeaders(apiKey, true),
         body: JSON.stringify({
           model,
           max_tokens: maxTokens,
@@ -348,7 +363,7 @@ export async function generateTitle(apiKey: string, prompt: string): Promise<str
   try {
     const res = await fetch(`${CODE_BASE}/v1/messages`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      headers: authHeaders(apiKey, true),
       body: JSON.stringify({
         // Sonnet 5 since 2026-07-15 (haiku and sonnet-4.6 are dead upstream); a title
         // turn is ~1K tokens, so the price difference is noise.

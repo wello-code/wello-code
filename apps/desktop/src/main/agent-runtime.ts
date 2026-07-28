@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { app } from "electron";
 import { SdkAgentSession, type AgentRunCallbacks, type SdkRunRequest } from "@wello-code/agent-sdk";
 import {
   parseAgentEvent,
@@ -141,7 +142,7 @@ export class AgentRuntime {
       };
       if (abort.signal.aborted) return;
 
-      const session = new SdkAgentSession({ apiKey });
+      const session = new SdkAgentSession({ apiKey, appVersion: app.getVersion() });
       const callbacks: AgentRunCallbacks = {
         onEvent: (event) => this.emit(event),
         requestPermission: (request: PermissionRequest) =>
