@@ -24,6 +24,10 @@ import { lineDiff } from "./line-diff";
 const SNAPSHOT_MAX_FILE_BYTES = 2 * 1024 * 1024;
 const SNAPSHOT_MAX_TOTAL_BYTES = 128 * 1024 * 1024;
 const MAX_FILES = 4000;
+/** Filesystem round trips in flight. Metadata is cheap and latency-bound, reads
+ *  are not — going wide on both is what turns a minute of scanning into seconds. */
+const STAT_CONCURRENCY = 32;
+const READ_CONCURRENCY = 12;
 
 /** Directories never snapshotted (noise / huge / build output) — mirrors the picker. */
 const IGNORE_DIRS = new Set([
@@ -58,8 +62,40 @@ function snapshotsRoot(): string {
 function taskDir(taskId: string): string {
   return join(snapshotsRoot(), sanitizeTaskId(taskId));
 }
-function objectPath(taskId: string, hash: string): string {
+/**
+ * Blobs live in ONE store for the whole app, keyed by content hash.
+ *
+ * They used to be per task, which meant a second chat on the same project paid
+ * for the entire tree again — both in time (read + hash + copy every file) and
+ * in disk (a 120 MB project cost 120 MB per chat). Same content, same hash, so
+ * one store serves every task; `gc` sweeps blobs nothing references anymore.
+ */
+function objectsDir(): string {
+  return join(snapshotsRoot(), "objects");
+}
+function objectPath(hash: string): string {
+  return join(objectsDir(), hash);
+}
+/** Where a pre-shared-store build kept this blob (still read, never written). */
+function legacyObjectPath(taskId: string, hash: string): string {
   return join(taskDir(taskId), "objects", hash);
+}
+/** A hash out of a manifest becomes a path segment — only ever a sha256 digest. */
+function isHash(hash: string): boolean {
+  return /^[0-9a-f]{64}$/.test(hash);
+}
+/** True when the blob is available to restore from (shared store or a legacy one). */
+async function hasObject(taskId: string, hash: string): Promise<boolean> {
+  if (!isHash(hash)) return false;
+  if (await stat(objectPath(hash)).catch(() => null)) return true;
+  return Boolean(await stat(legacyObjectPath(taskId, hash)).catch(() => null));
+}
+/** Blob bytes, from wherever this task's snapshot era put them. */
+async function readObject(taskId: string, hash: string): Promise<Buffer | null> {
+  if (!isHash(hash)) return null;
+  const shared = await readFile(objectPath(hash)).catch(() => null);
+  if (shared) return shared;
+  return readFile(legacyObjectPath(taskId, hash)).catch(() => null);
 }
 
 /** Reject any path that escapes the workspace (same contract as git/workspace-files). */
@@ -81,6 +117,33 @@ async function realInside(cwd: string, abs: string): Promise<string | null> {
   } catch {
     return abs;
   }
+}
+
+/** Same check with the workspace's real path already resolved (per-file in a
+ *  whole-tree scan, resolving it again for every file is thousands of syscalls). */
+async function realInsideCached(realCwd: string, abs: string): Promise<string | null> {
+  try {
+    const realTarget = await realpath(abs);
+    const rel = relative(realCwd, realTarget);
+    return rel !== "" && (rel.startsWith("..") || isAbsolute(rel)) ? null : realTarget;
+  } catch {
+    return abs;
+  }
+}
+
+/** Run `fn` over `items` with at most `limit` in flight; results keep input order. */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
 }
 
 function isBinary(buf: Buffer): boolean {
@@ -115,6 +178,139 @@ async function walk(cwd: string): Promise<string[]> {
   return out;
 }
 
+/* ── The tree scan, reused between turns ─────────────────────────────────────
+   A checkpoint is taken before EVERY turn, and the naive version read and
+   hashed the whole project each time: on a 1000-file / 56 MB repo that is ~1.8s
+   of main-process work per turn (plus 56 MB of disk reads), which is exactly
+   when the window has a stream to forward and IPC to answer. Between two turns
+   almost nothing changed, so we keep the last scan and re-use the recorded hash
+   of every file whose size AND mtime still match — the same staleness contract
+   `changedFiles` already relies on. Measured on that repo: 1.8 s → 0.3 s, and
+   nothing is read from disk at all. */
+
+/** The hint is per FOLDER, not per task: a new chat on the same project sees the
+ *  same tree, and starting one should not cost a full re-read. */
+function scanHintPath(cwd: string): string {
+  const key = createHash("sha256").update(cwd.toLowerCase()).digest("hex").slice(0, 32);
+  return join(snapshotsRoot(), "scans", `${key}.json`);
+}
+/** folder → its last scan, so a checkpoint mid-session skips even that read. */
+const lastScan = new Map<string, Record<string, SnapshotFileMeta>>();
+
+async function loadLastScan(cwd: string): Promise<Record<string, SnapshotFileMeta> | null> {
+  const cached = lastScan.get(cwd);
+  if (cached) return cached;
+  try {
+    const raw = JSON.parse(await readFile(scanHintPath(cwd), "utf8")) as {
+      files?: Record<string, SnapshotFileMeta>;
+    };
+    if (!raw.files) return null;
+    lastScan.set(cwd, raw.files);
+    return raw.files;
+  } catch {
+    return null; // no hint yet (or unreadable) — the next scan is simply a full one
+  }
+}
+
+async function rememberScan(cwd: string, files: Record<string, SnapshotFileMeta>): Promise<void> {
+  lastScan.set(cwd, files);
+  const target = scanHintPath(cwd);
+  try {
+    await mkdir(dirname(target), { recursive: true });
+    const tmp = `${target}.tmp`;
+    await writeFile(tmp, JSON.stringify({ version: 1, files }), "utf8");
+    await rename(tmp, target);
+  } catch {
+    // Best-effort: without the hint the next scan just costs a full read.
+  }
+}
+
+/**
+ * Hash the whole tree into the shared object store.
+ *
+ * `previous` is the folder's last scan: a file whose size and mtime are
+ * unchanged keeps its recorded hash (one stat, no read), as long as the blob is
+ * still in the store. Everything else is read, hashed and stored as before.
+ * Caps trip `partial` rather than throwing.
+ */
+async function scanTree(
+  taskId: string,
+  cwd: string,
+  previous: Record<string, SnapshotFileMeta> | null,
+): Promise<{ files: Record<string, SnapshotFileMeta>; partial: boolean }> {
+  const files: Record<string, SnapshotFileMeta> = {};
+  let partial = false;
+  const rels = await walk(cwd);
+  if (rels.length >= MAX_FILES) partial = true;
+  await mkdir(objectsDir(), { recursive: true });
+  const realCwd = await realpath(cwd).catch(() => cwd);
+
+  // 1. Stat everything in parallel — thousands of round trips one after another
+  //    is what made a scan take tens of seconds on a real project.
+  const stats = await mapLimit(rels, STAT_CONCURRENCY, async (rel) => {
+    let real: string | null;
+    try {
+      real = await realInsideCached(realCwd, assertInside(cwd, rel));
+    } catch {
+      return null; // path escapes the workspace — not ours to record
+    }
+    if (!real) return null;
+    const info = await stat(real).catch(() => null);
+    if (!info || !info.isFile()) return null;
+    return { rel, real, size: info.size, mtimeMs: info.mtimeMs };
+  });
+
+  // 2. Apply the caps in walk order, so which files a partial snapshot keeps
+  //    stays deterministic, and split "already known" from "must be read".
+  const toRead: { rel: string; real: string; size: number; mtimeMs: number }[] = [];
+  let total = 0;
+  for (const entry of stats) {
+    if (!entry) continue;
+    if (entry.size > SNAPSHOT_MAX_FILE_BYTES || total + entry.size > SNAPSHOT_MAX_TOTAL_BYTES) {
+      partial = true;
+      continue;
+    }
+    total += entry.size;
+    const before = previous?.[entry.rel];
+    if (before && before.size === entry.size && before.mtimeMs === entry.mtimeMs) {
+      files[entry.rel] = before;
+      continue;
+    }
+    toRead.push(entry);
+  }
+
+  // 3. A re-used hash is only good while its blob is still in the store.
+  const reused = Object.entries(files);
+  const present = await mapLimit(reused, STAT_CONCURRENCY, ([, meta]) =>
+    hasObject(taskId, meta.hash),
+  );
+  reused.forEach(([rel, meta], i) => {
+    if (!present[i]) {
+      delete files[rel];
+      toRead.push({ rel, real: resolve(cwd, rel), size: meta.size, mtimeMs: meta.mtimeMs });
+    }
+  });
+
+  // 4. Read + hash + store only what actually changed.
+  const stored = await mapLimit(toRead, READ_CONCURRENCY, async (entry) => {
+    const buf = await readFile(entry.real).catch(() => null);
+    if (!buf) return null;
+    const hash = createHash("sha256").update(buf).digest("hex");
+    const obj = objectPath(hash);
+    if (!(await stat(obj).catch(() => null))) {
+      const tmp = `${obj}.${process.pid}.tmp`;
+      await writeFile(tmp, buf);
+      await rename(tmp, obj);
+    }
+    return {
+      rel: entry.rel,
+      meta: { hash, size: entry.size, mtimeMs: entry.mtimeMs, binary: isBinary(buf) },
+    };
+  });
+  for (const s of stored) if (s) files[s.rel] = s.meta;
+  return { files, partial };
+}
+
 async function loadManifest(taskId: string): Promise<SnapshotManifest | null> {
   try {
     return JSON.parse(await readFile(join(taskDir(taskId), "manifest.json"), "utf8")) as SnapshotManifest;
@@ -139,38 +335,7 @@ async function writeManifest(taskId: string, manifest: SnapshotManifest): Promis
 export async function ensureBaseline(taskId: string, cwd: string): Promise<void> {
   sanitizeTaskId(taskId);
   if (await loadManifest(taskId)) return;
-  const files: Record<string, SnapshotFileMeta> = {};
-  let total = 0;
-  let partial = false;
-  const rels = await walk(cwd);
-  if (rels.length >= MAX_FILES) partial = true;
-  await mkdir(join(taskDir(taskId), "objects"), { recursive: true });
-  for (const rel of rels) {
-    const real = await realInside(cwd, assertInside(cwd, rel));
-    if (!real) continue;
-    let info;
-    try {
-      info = await stat(real);
-    } catch {
-      continue;
-    }
-    if (!info.isFile()) continue;
-    if (info.size > SNAPSHOT_MAX_FILE_BYTES || total + info.size > SNAPSHOT_MAX_TOTAL_BYTES) {
-      partial = true;
-      continue;
-    }
-    const buf = await readFile(real).catch(() => null);
-    if (!buf) continue;
-    const hash = createHash("sha256").update(buf).digest("hex");
-    const obj = objectPath(taskId, hash);
-    if (!(await stat(obj).catch(() => null))) {
-      const tmp = `${obj}.tmp`;
-      await writeFile(tmp, buf);
-      await rename(tmp, obj);
-    }
-    files[rel] = { hash, size: info.size, mtimeMs: info.mtimeMs, binary: isBinary(buf) };
-    total += info.size;
-  }
+  const { files, partial } = await scanTree(taskId, cwd, await loadLastScan(cwd));
   await writeManifest(taskId, {
     version: 1,
     createdAt: new Date().toISOString(),
@@ -178,6 +343,9 @@ export async function ensureBaseline(taskId: string, cwd: string): Promise<void>
     partial,
     files,
   });
+  // The turn's checkpoint runs right after this one — hand it the scan so the
+  // very first turn walks the tree once instead of reading it twice.
+  await rememberScan(cwd, files);
 }
 
 /* ── Git baseline: what was ALREADY dirty when the task started ──────────────
@@ -220,7 +388,7 @@ export async function ensureGitBaseline(
   if (await loadGitBaseline(taskId)) return;
   const files: Record<string, SnapshotFileMeta> = {};
   let total = 0;
-  await mkdir(join(taskDir(taskId), "objects"), { recursive: true });
+  await mkdir(objectsDir(), { recursive: true });
   for (const rel of dirtyPaths.slice(0, GIT_BASELINE_MAX_FILES)) {
     let real: string | null;
     try {
@@ -235,9 +403,9 @@ export async function ensureGitBaseline(
     const buf = await readFile(real).catch(() => null);
     if (!buf) continue;
     const hash = createHash("sha256").update(buf).digest("hex");
-    const obj = objectPath(taskId, hash);
+    const obj = objectPath(hash);
     if (!(await stat(obj).catch(() => null))) {
-      const tmp = `${obj}.tmp`;
+      const tmp = `${obj}.${process.pid}.tmp`;
       await writeFile(tmp, buf);
       await rename(tmp, obj);
     }
@@ -295,7 +463,7 @@ export async function restoreGitBaselineFile(taskId: string, cwd: string, rel: s
   const base = await loadGitBaseline(taskId);
   const meta = base?.files[rel];
   if (!meta) return false;
-  const buf = await readFile(objectPath(taskId, meta.hash)).catch(() => null);
+  const buf = await readObject(taskId, meta.hash);
   if (!buf) return false;
   const abs = assertInside(cwd, rel);
   const parent = dirname(abs);
@@ -322,29 +490,42 @@ async function changedFiles(cwd: string, manifest: SnapshotManifest): Promise<Ch
   for (const rel of Object.keys(manifest.files)) {
     if (!currentSet.has(rel)) changes.push({ rel, status: "deleted" });
   }
-  for (const rel of current) {
+  const realCwd = await realpath(cwd).catch(() => cwd);
+  // Runs after every turn, over the whole tree: stat wide, then hash only the
+  // few files whose size or mtime moved.
+  type Verdict =
+    | { kind: "added"; rel: string }
+    | { kind: "suspect"; rel: string; real: string; base: SnapshotFileMeta };
+  const verdicts = await mapLimit<string, Verdict | null>(current, STAT_CONCURRENCY, async (rel) => {
     const base = manifest.files[rel];
-    const real = await realInside(cwd, assertInside(cwd, rel));
-    if (!real) continue;
-    const info = await stat(real).catch(() => null);
-    if (!info || !info.isFile()) continue;
-    if (!base) {
-      changes.push({ rel, status: "added" });
-      continue;
+    let real: string | null;
+    try {
+      real = await realInsideCached(realCwd, assertInside(cwd, rel));
+    } catch {
+      return null;
     }
+    if (!real) return null;
+    const info = await stat(real).catch(() => null);
+    if (!info || !info.isFile()) return null;
+    if (!base) return { kind: "added", rel };
     // Unchanged fast-path: same size AND mtime → skip the hash.
-    if (info.size === base.size && info.mtimeMs === base.mtimeMs) continue;
-    const buf = await readFile(real).catch(() => null);
-    if (!buf) continue;
-    const hash = createHash("sha256").update(buf).digest("hex");
-    if (hash !== base.hash) changes.push({ rel, status: "modified" });
-  }
+    if (info.size === base.size && info.mtimeMs === base.mtimeMs) return null;
+    return { kind: "suspect", rel, real, base };
+  });
+  const suspects = verdicts.filter((v): v is Extract<Verdict, { kind: "suspect" }> => v?.kind === "suspect");
+  for (const v of verdicts) if (v?.kind === "added") changes.push({ rel: v.rel, status: "added" });
+  const confirmed = await mapLimit(suspects, READ_CONCURRENCY, async (s) => {
+    const buf = await readFile(s.real).catch(() => null);
+    if (!buf) return null;
+    return createHash("sha256").update(buf).digest("hex") === s.base.hash ? null : s.rel;
+  });
+  for (const rel of confirmed) if (rel) changes.push({ rel, status: "modified" });
   return changes;
 }
 
 async function baseText(taskId: string, meta: SnapshotFileMeta): Promise<string | null> {
   if (meta.binary) return null;
-  const buf = await readFile(objectPath(taskId, meta.hash)).catch(() => null);
+  const buf = await readObject(taskId, meta.hash);
   return buf ? buf.toString("utf8") : null;
 }
 async function currentText(cwd: string, rel: string): Promise<string | null> {
@@ -408,7 +589,7 @@ export async function snapshotRevertFile(taskId: string, cwd: string, rel: strin
     if (real) await rm(real, { force: true });
     return;
   }
-  const buf = await readFile(objectPath(taskId, base.hash)).catch(() => null);
+  const buf = await readObject(taskId, base.hash);
   if (!buf) return;
   // Confine the WRITE: realInside on the parent dir so a symlinked path can't land
   // bytes outside the workspace; create parent dirs only inside the tree.
@@ -448,33 +629,7 @@ function checkpointPath(taskId: string, turnId: string): string {
 export async function captureCheckpoint(taskId: string, turnId: string, cwd: string): Promise<void> {
   sanitizeTaskId(taskId);
   sanitizeCheckpointId(turnId);
-  const files: Record<string, SnapshotFileMeta> = {};
-  let total = 0;
-  let partial = false;
-  const rels = await walk(cwd);
-  if (rels.length >= MAX_FILES) partial = true;
-  await mkdir(join(taskDir(taskId), "objects"), { recursive: true });
-  for (const rel of rels) {
-    const real = await realInside(cwd, assertInside(cwd, rel));
-    if (!real) continue;
-    const info = await stat(real).catch(() => null);
-    if (!info || !info.isFile()) continue;
-    if (info.size > SNAPSHOT_MAX_FILE_BYTES || total + info.size > SNAPSHOT_MAX_TOTAL_BYTES) {
-      partial = true;
-      continue;
-    }
-    const buf = await readFile(real).catch(() => null);
-    if (!buf) continue;
-    const hash = createHash("sha256").update(buf).digest("hex");
-    const obj = objectPath(taskId, hash);
-    if (!(await stat(obj).catch(() => null))) {
-      const tmp = `${obj}.tmp`;
-      await writeFile(tmp, buf);
-      await rename(tmp, obj);
-    }
-    files[rel] = { hash, size: info.size, mtimeMs: info.mtimeMs, binary: isBinary(buf) };
-    total += info.size;
-  }
+  const { files, partial } = await scanTree(taskId, cwd, await loadLastScan(cwd));
   const target = checkpointPath(taskId, turnId);
   await mkdir(dirname(target), { recursive: true });
   const tmp = `${target}.tmp`;
@@ -484,6 +639,7 @@ export async function captureCheckpoint(taskId: string, turnId: string, cwd: str
     "utf8",
   );
   await rename(tmp, target);
+  await rememberScan(cwd, files);
 }
 
 /** Whether a checkpoint exists for this turn (gates the «Откатить сюда» button). */
@@ -521,7 +677,7 @@ export async function restoreCheckpoint(taskId: string, turnId: string, cwd: str
   }
   // Rewrite every checkpointed file to its recorded bytes (guarded write path).
   for (const [rel, meta] of Object.entries(manifest.files)) {
-    const buf = await readFile(objectPath(taskId, meta.hash)).catch(() => null);
+    const buf = await readObject(taskId, meta.hash);
     if (!buf) continue;
     const abs = assertInside(cwd, rel);
     const parent = dirname(abs);
@@ -541,13 +697,64 @@ export async function forget(taskId: string): Promise<void> {
   await rm(taskDir(taskId), { recursive: true, force: true }).catch(() => undefined);
 }
 
-/** Remove snapshot dirs for tasks that no longer exist (orphan sweep). */
+/** Every blob hash a task's manifests still point at. */
+async function referencedHashes(taskId: string): Promise<Set<string> | null> {
+  const found = new Set<string>();
+  const collect = async (file: string): Promise<boolean> => {
+    const raw = await readFile(file, "utf8").catch(() => null);
+    if (raw === null) return true; // absent is fine — nothing to reference
+    try {
+      const parsed = JSON.parse(raw) as { files?: Record<string, { hash?: unknown }> };
+      for (const meta of Object.values(parsed.files ?? {})) {
+        if (typeof meta?.hash === "string") found.add(meta.hash);
+      }
+      return true;
+    } catch {
+      return false; // unreadable manifest — do NOT let the sweep guess
+    }
+  };
+  const dir = taskDir(taskId);
+  if (!(await collect(join(dir, "manifest.json")))) return null;
+  if (!(await collect(join(dir, GIT_BASELINE_FILE)))) return null;
+  const cps = await readdir(join(dir, "checkpoints")).catch(() => [] as string[]);
+  for (const name of cps) {
+    if (!name.endsWith(".json")) continue;
+    if (!(await collect(join(dir, "checkpoints", name)))) return null;
+  }
+  return found;
+}
+
+/**
+ * Remove snapshot dirs for tasks that no longer exist, then drop shared blobs
+ * nothing references anymore (mark and sweep). Called at startup, when no run
+ * can be writing — a blob stored by a checkpoint whose manifest is not on disk
+ * yet would otherwise look unreferenced. Any manifest we fail to parse cancels
+ * the sweep: keeping dead bytes is cheap, deleting live ones breaks rewind.
+ */
 export async function gc(knownTaskIds: string[]): Promise<void> {
   const keep = new Set(knownTaskIds.filter((id) => /^[A-Za-z0-9_-]+$/.test(id)));
   const dirs = await readdir(snapshotsRoot(), { withFileTypes: true }).catch(() => []);
   for (const d of dirs) {
-    if (d.isDirectory() && !keep.has(d.name)) {
+    if (!d.isDirectory()) continue;
+    if (d.name === "objects" || d.name === "scans") continue; // shared, not a task
+    if (!keep.has(d.name)) {
       await rm(join(snapshotsRoot(), d.name), { recursive: true, force: true }).catch(() => undefined);
     }
+  }
+  const live = new Set<string>();
+  for (const id of keep) {
+    const hashes = await referencedHashes(id);
+    if (!hashes) return; // a manifest we could not read — leave every blob alone
+    for (const h of hashes) live.add(h);
+  }
+  const blobs = await readdir(objectsDir()).catch(() => [] as string[]);
+  for (const name of blobs) {
+    if (live.has(name)) continue;
+    if (name.endsWith(".tmp")) {
+      // Could be a write in flight; only sweep the ones a crash left behind.
+      const info = await stat(objectPath(name)).catch(() => null);
+      if (!info || Date.now() - info.mtimeMs < 60 * 60 * 1000) continue;
+    }
+    await rm(objectPath(name), { force: true }).catch(() => undefined);
   }
 }
