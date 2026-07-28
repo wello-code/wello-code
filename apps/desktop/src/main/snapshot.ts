@@ -697,6 +697,33 @@ export async function forget(taskId: string): Promise<void> {
   await rm(taskDir(taskId), { recursive: true, force: true }).catch(() => undefined);
 }
 
+/**
+ * Move a task's own blob folder into the shared store (upgrade path).
+ *
+ * Before the shared store every task copied the whole project for itself, so an
+ * install that has been through a few chats on one repo is carrying the same
+ * bytes several times over — hundreds of megabytes each. Moving them in is a
+ * rename inside one volume: near-free, and duplicates simply collapse onto the
+ * hash that is already there. Anything unmovable stays where it is and keeps
+ * being read from the legacy path.
+ */
+async function adoptLegacyObjects(taskId: string): Promise<void> {
+  const dir = join(taskDir(taskId), "objects");
+  const names = await readdir(dir).catch(() => null);
+  if (!names) return; // nothing legacy here
+  await mkdir(objectsDir(), { recursive: true }).catch(() => undefined);
+  for (const name of names) {
+    if (!isHash(name)) continue; // stray tmp file — leave it to the sweep below
+    const target = objectPath(name);
+    if (await stat(target).catch(() => null)) {
+      await rm(join(dir, name), { force: true }).catch(() => undefined); // already shared
+      continue;
+    }
+    await rename(join(dir, name), target).catch(() => undefined);
+  }
+  await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+}
+
 /** Every blob hash a task's manifests still point at. */
 async function referencedHashes(taskId: string): Promise<Set<string> | null> {
   const found = new Set<string>();
@@ -739,6 +766,8 @@ export async function gc(knownTaskIds: string[]): Promise<void> {
     if (d.name === "objects" || d.name === "scans") continue; // shared, not a task
     if (!keep.has(d.name)) {
       await rm(join(snapshotsRoot(), d.name), { recursive: true, force: true }).catch(() => undefined);
+    } else {
+      await adoptLegacyObjects(d.name);
     }
   }
   const live = new Set<string>();

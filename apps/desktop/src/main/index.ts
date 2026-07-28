@@ -45,7 +45,7 @@ import {
 import { AgentRuntime } from "./agent-runtime";
 import * as gitService from "./git";
 import { loadState, saveState } from "./state-store";
-import { loadSettings, saveSettings } from "./settings-store";
+import { hardwareAccelerationEnabledSync, loadSettings, saveSettings } from "./settings-store";
 import { cleanupPastes, savePastedImage, saveImageBuffer } from "./paste-store";
 import { readImageData, statPaths } from "./media";
 import { instructionsInfo, listWorkspaceFiles, openWorkspaceFile, readWorkspaceFile } from "./workspace-files";
@@ -61,6 +61,7 @@ import {
 import * as reviewService from "./review";
 import * as snapshot from "./snapshot";
 import * as previewServer from "./preview-server";
+import { perfReportText, startPerfWatch } from "./perf-watch";
 import { resolvePreviewRoot } from "./preview-root";
 import {
   previewViewBack,
@@ -86,12 +87,19 @@ const isDev = Boolean(rendererUrl);
 // Before anything else can throw: from here on a crash leaves a trace on disk
 // instead of vanishing with the window.
 installCrashHandlers();
+// Before anything else, and before the app is ready: Chromium only honors this
+// switch that early. Off by choice only — on a laptop with switchable graphics
+// GPU compositing can keep the fans running on an idle window, and software
+// drawing is the calmer trade there.
+const gpuOn = hardwareAccelerationEnabledSync();
+if (!gpuOn) app.disableHardwareAcceleration();
 log.info("app starting", {
   version: app.getVersion(),
   platform: process.platform,
   arch: process.arch,
   electron: process.versions.electron,
   dev: isDev,
+  hardwareAcceleration: gpuOn,
 });
 
 // One instance only: a second launch would race the same wello-state.json (silent
@@ -223,6 +231,9 @@ function registerIpc(): void {
   ipcMain.handle("app.showLog", () => {
     shell.showItemInFolder(logPath());
   });
+  // A support report the user can paste: versions, per-process CPU/memory and the
+  // GPU feature matrix. Read-only, main-side — nothing here comes from the page.
+  ipcMain.handle("app.perfReport", () => perfReportText());
 
   ipcMain.handle("update.status", () => updateStatus());
   ipcMain.handle("update.check", () => checkForUpdates());
@@ -1091,6 +1102,10 @@ app.whenReady().then(() => {
 
   registerIpc();
   createWindow();
+
+  // Watch what the app costs the machine. Writes nothing while everything is
+  // normal; a spike leaves one line in the log, which is what a report needs.
+  startPerfWatch();
 
   initUpdater((status) => mainWindow?.webContents.send("update.changed", status));
   // Check a little after launch rather than during it: startup is already busy,

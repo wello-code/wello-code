@@ -366,6 +366,17 @@ export interface AppSettings {
    * (0), which gives back the model's full window.
    */
   autoCompactWindow?: number;
+  /**
+   * Whether the window is composited by the GPU (default on, as Chromium ships).
+   *
+   * On a laptop with switchable graphics or a flaky driver, GPU compositing is
+   * exactly what makes an idle window spin the fans: every caret blink and every
+   * hover repaint goes through a driver path that misbehaves. Turning it off
+   * makes Chromium draw in software, which is slower in theory and calmer in
+   * practice on those machines. Read once at startup — changing it needs a
+   * restart, because the switch has to be set before the app is ready.
+   */
+  hardwareAcceleration?: boolean;
 }
 
 /** Result of reading a workspace file for the inspector's file view. */
@@ -441,6 +452,8 @@ export interface WelloApi {
   getAppInfo(): Promise<AppInfo>;
   /** Reveal the main-process log in the OS file manager (for attaching to a report). */
   showLog(): Promise<void>;
+  /** Human-readable performance snapshot (versions, per-process CPU/RAM, GPU status). */
+  perfReport(): Promise<string>;
   /** Current update state (also pushed via {@link onUpdateStatus}). */
   getUpdateStatus(): Promise<UpdateStatus>;
   /** Ask GitHub Releases whether a newer version exists. */

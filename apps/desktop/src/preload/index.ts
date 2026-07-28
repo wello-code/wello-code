@@ -19,6 +19,7 @@ const api: WelloApi = {
   ping: () => ipcRenderer.invoke("app.ping") as Promise<"pong">,
   getAppInfo: () => ipcRenderer.invoke("app.getInfo") as Promise<AppInfo>,
   showLog: () => ipcRenderer.invoke("app.showLog") as Promise<void>,
+  perfReport: () => ipcRenderer.invoke("app.perfReport") as Promise<string>,
   getUpdateStatus: () => ipcRenderer.invoke("update.status") as Promise<UpdateStatus>,
   checkForUpdates: () => ipcRenderer.invoke("update.check") as Promise<void>,
   downloadUpdate: () => ipcRenderer.invoke("update.download") as Promise<void>,

@@ -630,6 +630,52 @@ function GeneralPage({
           />
         </Card>
       </Section>
+      <Section title="Производительность">
+        <Card>
+          <Row
+            rowId="hwaccel"
+            title="Аппаратное ускорение"
+            desc={
+              "Окно рисует видеокарта. На ноутбуках с двумя видеокартами или капризным " +
+              "драйвером это иногда даёт обратное: греется и шумит даже когда приложение " +
+              "простаивает. Выключите, если так, и перезапустите приложение."
+            }
+            control={
+              settings ? (
+                <Switch
+                  checked={settings.hardwareAcceleration !== false}
+                  onChange={(v) => {
+                    persist({ ...settings, hardwareAcceleration: v });
+                    toast({ message: "Применится после перезапуска приложения" });
+                  }}
+                  label="Аппаратное ускорение"
+                />
+              ) : undefined
+            }
+          />
+          <Row
+            rowId="perf-report"
+            title="Отчёт о нагрузке"
+            desc="Что приложение занимает прямо сейчас: память и процессор по процессам, состояние графики. Пригодится, если пишете в поддержку про тормоза."
+            control={
+              <button
+                className="button"
+                onClick={() => {
+                  void window.wello
+                    .perfReport()
+                    .then((text) => navigator.clipboard.writeText(text))
+                    .then(() => toast({ message: "Отчёт скопирован" }))
+                    .catch(() =>
+                      toast({ message: "Не удалось собрать отчёт", tone: "danger" }),
+                    );
+                }}
+              >
+                Скопировать
+              </button>
+            }
+          />
+        </Card>
+      </Section>
       <Section title="О приложении">
         <Card>
           <Row

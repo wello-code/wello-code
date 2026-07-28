@@ -230,6 +230,28 @@ describe("checkpoints (rewind)", () => {
     expect(second).toBeLessThan(first / 2);
   }, 60_000);
 
+  it("gc adopts a pre-shared-store task's blobs instead of stranding them", async () => {
+    const ws = await newWorkspace();
+    await writeFile(join(ws, "old.ts"), "bytes from an older version\n");
+    await captureCheckpoint("task-legacy", "run-1", ws);
+    // Simulate the old layout: the blob lives in the task's own folder only.
+    const objects = join(userData, "review-snapshots", "objects");
+    const legacy = join(userData, "review-snapshots", "task-legacy", "objects");
+    await mkdir(legacy, { recursive: true });
+    for (const name of await readdir(objects)) {
+      await writeFile(join(legacy, name), await readFile(join(objects, name)));
+    }
+    await rm(objects, { recursive: true, force: true });
+
+    await gc(["task-legacy"]);
+
+    // The folder is gone, the bytes are not: a rewind still works.
+    expect(await exists(legacy)).toBe(false);
+    await writeFile(join(ws, "old.ts"), "changed\n");
+    expect(await restoreCheckpoint("task-legacy", "run-1", ws)).toBe(true);
+    expect(await readFile(join(ws, "old.ts"), "utf8")).toBe("bytes from an older version\n");
+  }, 30_000);
+
   it("gc drops blobs no task references and keeps the ones still used", async () => {
     const ws = await newWorkspace();
     await writeFile(join(ws, "live.ts"), "kept by task-live\n");

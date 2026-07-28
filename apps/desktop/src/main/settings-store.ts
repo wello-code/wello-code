@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { app } from "electron";
@@ -16,6 +17,7 @@ const DEFAULTS: AppSettings = {
   gitPrDraftDefault: true,
   gitPrInstructions: "",
   autoCompactWindow: DEFAULT_AUTO_COMPACT_WINDOW,
+  hardwareAcceleration: true,
 };
 
 /** Keep only boolean entries of a saved on/off map (defensive against hand-edits). */
@@ -56,9 +58,25 @@ export async function loadSettings(): Promise<AppSettings> {
         typeof parsed.autoCompactWindow === "number" && parsed.autoCompactWindow >= 0
           ? Math.round(parsed.autoCompactWindow)
           : DEFAULT_AUTO_COMPACT_WINDOW,
+      hardwareAcceleration: parsed.hardwareAcceleration !== false, // default on
     };
   } catch {
     return { ...DEFAULTS };
+  }
+}
+
+/**
+ * The one setting that cannot wait for the async load: Chromium's GPU switch has
+ * to be flipped BEFORE the app is ready, which is before anything may await. A
+ * tiny synchronous read at startup is the price; every other setting keeps the
+ * async path.
+ */
+export function hardwareAccelerationEnabledSync(): boolean {
+  try {
+    const parsed = JSON.parse(readFileSync(settingsPath(), "utf8")) as AppSettings;
+    return parsed.hardwareAcceleration !== false;
+  } catch {
+    return true; // no settings file yet, or unreadable — ship the default
   }
 }
 
