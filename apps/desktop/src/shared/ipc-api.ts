@@ -509,6 +509,9 @@ export interface WelloApi {
   // Durable session state (tasks + last workspace survive restarts).
   loadState(): Promise<PersistedState | null>;
   saveState(state: PersistedState): Promise<void>;
+  /** Persist ONLY the composer drafts (merged into the last saved state), so
+   *  typing never re-serialises the whole chat history through the main process. */
+  saveDrafts(drafts: Record<string, string>): Promise<void>;
 
   // App settings (MCP connectors, plugins).
   getSettings(): Promise<AppSettings>;

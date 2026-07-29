@@ -44,7 +44,7 @@ import {
 } from "./auth-device";
 import { AgentRuntime } from "./agent-runtime";
 import * as gitService from "./git";
-import { loadState, saveState } from "./state-store";
+import { loadState, saveDrafts, saveState } from "./state-store";
 import { hardwareAccelerationEnabledSync, loadSettings, saveSettings } from "./settings-store";
 import { cleanupPastes, savePastedImage, saveImageBuffer } from "./paste-store";
 import { readImageData, statPaths } from "./media";
@@ -446,6 +446,17 @@ function registerIpc(): void {
   );
   ipcMain.handle("state.save", (_e, state: PersistedState): void => {
     saveState(state);
+  });
+  ipcMain.handle("state.saveDrafts", (_e, drafts: unknown): Promise<void> => {
+    // Renderer input: keep only string→string pairs, so a malformed payload can
+    // never put anything else into the state file.
+    const clean: Record<string, string> = {};
+    if (drafts && typeof drafts === "object" && !Array.isArray(drafts)) {
+      for (const [k, v] of Object.entries(drafts as Record<string, unknown>)) {
+        if (typeof v === "string") clean[k] = v;
+      }
+    }
+    return saveDrafts(clean);
   });
 
   // --- App settings (MCP connectors, plugins) --------------------------------

@@ -1,6 +1,7 @@
 import { app } from "electron";
 import { log } from "./logger";
 import { hardwareAccelerationEnabledSync } from "./settings-store";
+import { saveStats } from "./state-store";
 
 /**
  * Who is actually burning the machine.
@@ -33,10 +34,28 @@ export interface ProcSample {
   mb: number;
 }
 
+/**
+ * What the MAIN process holds, split by kind. The per-process working set says
+ * which process is heavy; this says what is heavy inside it, which is the
+ * difference between "our JS retains it" (heap), "buffers/IPC payloads"
+ * (external) and "Chromium/native" (rss with a small heap).
+ */
+export interface MainMemory {
+  rssMb: number;
+  heapUsedMb: number;
+  heapTotalMb: number;
+  externalMb: number;
+  arrayBuffersMb: number;
+}
+
 export interface PerfReport {
   at: string;
   totalMb: number;
   processes: ProcSample[];
+  main: MainMemory;
+  /** Saved-state size and how many autosaves have run — the other way a long
+   *  session grows: the whole history is written on every structural change. */
+  state: { saves: number; bytes: number };
   /** Whether the GPU is doing the compositing, and what Chromium thinks of it. */
   gpu: Record<string, string>;
 }
@@ -57,17 +76,30 @@ function sample(): PerfReport {
   } catch {
     // Not fatal: the report is still useful without the feature matrix.
   }
+  const mb = (bytes: number): number => Math.round(bytes / (1024 * 1024));
+  const m = process.memoryUsage();
   return {
     at: new Date().toISOString(),
     totalMb: processes.reduce((n, p) => n + p.mb, 0),
     processes,
+    main: {
+      rssMb: mb(m.rss),
+      heapUsedMb: mb(m.heapUsed),
+      heapTotalMb: mb(m.heapTotal),
+      externalMb: mb(m.external),
+      arrayBuffersMb: mb(m.arrayBuffers),
+    },
+    state: saveStats(),
     gpu,
   };
 }
 
 function line(report: PerfReport): string {
   const procs = report.processes.map((p) => `${p.type}#${p.pid} ${p.cpu}%cpu ${p.mb}MB`).join(" | ");
-  return `total ${report.totalMb}MB | ${procs}`;
+  const m = report.main;
+  const main = `main rss ${m.rssMb}MB heap ${m.heapUsedMb}/${m.heapTotalMb}MB ext ${m.externalMb}MB ab ${m.arrayBuffersMb}MB`;
+  const st = `state ${Math.round(report.state.bytes / 1024)}KB x${report.state.saves}`;
+  return `total ${report.totalMb}MB | ${main} | ${st} | ${procs}`;
 }
 
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -115,6 +147,12 @@ export function perfReportText(): string {
     "",
     `Процессы (${report.totalMb} МБ всего):`,
     ...report.processes.map((p) => `  ${p.type} #${p.pid}: ${p.cpu}% CPU, ${p.mb} МБ`),
+    "",
+    "Главный процесс:",
+    `  занято скриптами: ${report.main.heapUsedMb} из ${report.main.heapTotalMb} МБ`,
+    `  буферы: ${report.main.externalMb} МБ (из них массивы ${report.main.arrayBuffersMb} МБ)`,
+    `  всего у процесса: ${report.main.rssMb} МБ`,
+    `  сохранений истории: ${report.state.saves}, последняя запись ${Math.round(report.state.bytes / 1024)} КБ`,
     "",
     "Графика:",
     gpu || "  нет данных",

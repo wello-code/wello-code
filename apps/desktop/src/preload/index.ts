@@ -59,6 +59,8 @@ const api: WelloApi = {
 
   loadState: () => ipcRenderer.invoke("state.load"),
   saveState: (state) => ipcRenderer.invoke("state.save", state) as Promise<void>,
+  saveDrafts: (drafts: Record<string, string>) =>
+    ipcRenderer.invoke("state.saveDrafts", drafts) as Promise<void>,
 
   getSettings: () => ipcRenderer.invoke("settings.get") as Promise<AppSettings>,
   setSettings: (settings: AppSettings) => ipcRenderer.invoke("settings.set", settings) as Promise<void>,

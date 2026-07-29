@@ -827,28 +827,52 @@ function Workspace({
     });
   }, []);
 
+  // The drafts map as the save paths want it: every chat's held text, plus the
+  // active chat's live composer content (so a half-typed message survives a
+  // restart even without switching chats first).
+  const collectDrafts = useCallback((): Record<string, string> => {
+    const drafts: Record<string, string> = {};
+    for (const [k, v] of draftsRef.current) if (v.trim()) drafts[k] = v;
+    const activeKey = draftKey(state.activeId);
+    if (prompt.trim() && !editing) drafts[activeKey] = prompt;
+    else delete drafts[activeKey];
+    return drafts;
+  }, [state.activeId, prompt, editing]);
+  const draftsForSave = useRef(collectDrafts);
+  draftsForSave.current = collectDrafts;
+
   // Debounced autosave — but never before the restore finished (an early save
-  // would clobber the previous session with an empty one). The composer draft
-  // rides along: the active chat's live text is folded into the drafts map so a
-  // half-typed message survives a restart even without switching chats first.
+  // would clobber the previous session with an empty one).
+  //
+  // ⚠️ Deliberately NOT keyed on the composer text. This effect ships the entire
+  // history of every chat across the IPC boundary, where it is deep-copied and
+  // serialised; with `prompt` in the deps that happened on every pause in typing,
+  // so a long-lived window churned tens of MB through the main process for a few
+  // typed characters — reported in the field as a main process holding well over
+  // a gigabyte. Typing now takes the drafts-only path below.
   useEffect(() => {
     if (!hydrated.current) return;
     const id = setTimeout(() => {
-      const drafts: Record<string, string> = {};
-      for (const [k, v] of draftsRef.current) if (v.trim()) drafts[k] = v;
-      const activeKey = draftKey(state.activeId);
-      if (prompt.trim() && !editing) drafts[activeKey] = prompt;
-      else delete drafts[activeKey];
       void window.wello.saveState({
         version: 1,
         workspace,
         activeId: state.activeId,
         tasks: state.tasks,
-        drafts,
+        drafts: draftsForSave.current(),
       });
     }, 600);
     return () => clearTimeout(id);
-  }, [state, workspace, prompt, editing]);
+  }, [state, workspace]);
+
+  // Typing: persist the drafts alone, merged into the last saved state by main.
+  // A couple of short strings instead of the whole conversation history.
+  useEffect(() => {
+    if (!hydrated.current) return;
+    const id = setTimeout(() => {
+      void window.wello.saveDrafts(draftsForSave.current());
+    }, 900);
+    return () => clearTimeout(id);
+  }, [prompt, editing]);
 
   // Follow the stream only while the user is at (or near) the bottom — never
   // yank the view down while they are reading earlier turns. The 120px pin

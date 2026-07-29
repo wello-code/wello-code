@@ -79,19 +79,84 @@ export async function loadState(): Promise<PersistedState | null> {
   return null;
 }
 
-let writing = Promise.resolve();
+/**
+ * The newest state waiting to be written, and whether a write is in flight.
+ *
+ * ⚠️ This used to be a promise CHAIN (`writing = writing.then(...)`), which meant
+ * every queued save kept its own full copy of the state alive until its turn came
+ * — and every copy is the ENTIRE history of every chat, freshly deep-copied by
+ * the IPC boundary. Saves arrive far faster than a disk write completes (see the
+ * autosave in App.tsx), so a heavy user could hold several tens of MB of
+ * superseded snapshots at once and serialise all of them in a row, when only the
+ * last one is worth writing. Now: at most one queued state, newest wins, and the
+ * superseded copy becomes garbage immediately.
+ */
+let queued: PersistedState | null = null;
+let flushing = false;
+/** The state being written right now. Part of the merge base for a drafts-only
+ *  save: without it, drafts arriving DURING a write would merge into the older
+ *  `lastWritten` and push the in-flight turn back out of the file. */
+let inFlight: PersistedState | null = null;
+/** The last state actually written — the merge base for a drafts-only save. */
+let lastWritten: PersistedState | null = null;
+/** Diagnostics only — surfaced in the perf report so a "it eats memory" ticket
+ *  carries the numbers instead of a feeling. */
+let savesSinceStart = 0;
+let lastStateBytes = 0;
+
+async function writeStateFile(state: PersistedState): Promise<void> {
+  const target = statePath();
+  await mkdir(dirname(target), { recursive: true });
+  const tmp = target + ".tmp";
+  const json = JSON.stringify(state);
+  lastStateBytes = Buffer.byteLength(json);
+  savesSinceStart += 1;
+  await writeFile(tmp, json, "utf8");
+  await rename(tmp, target);
+  lastWritten = state;
+}
+
+/** How much the last save wrote, and how many saves have run. */
+export function saveStats(): { saves: number; bytes: number } {
+  return { saves: savesSinceStart, bytes: lastStateBytes };
+}
 
 export function saveState(state: PersistedState): void {
-  // Serialize writes so a fast sequence of saves cannot interleave tmp files.
-  writing = writing.then(async () => {
+  // Newest wins: an older queued snapshot is dropped, never written.
+  queued = state;
+  if (flushing) return;
+  flushing = true;
+  void (async () => {
     try {
-      const target = statePath();
-      await mkdir(dirname(target), { recursive: true });
-      const tmp = target + ".tmp";
-      await writeFile(tmp, JSON.stringify(state), "utf8");
-      await rename(tmp, target);
-    } catch {
-      // Persistence is best-effort; the running session keeps its in-memory state.
+      while (queued) {
+        const next = queued;
+        queued = null;
+        inFlight = next;
+        try {
+          await writeStateFile(next);
+        } catch {
+          // Persistence is best-effort; the running session keeps its state.
+        } finally {
+          inFlight = null;
+        }
+      }
+    } finally {
+      flushing = false;
     }
-  });
+  })();
+}
+
+/**
+ * Persist ONLY the composer drafts, merged into the last state we wrote.
+ *
+ * Typing must not cost the whole history: the autosave's deps include the live
+ * prompt, so every pause in typing used to ship (and re-serialise) every chat
+ * the user has ever had. Drafts are a handful of strings — they take this path
+ * instead, and the heavy save stays for changes that actually touch the tasks.
+ */
+export async function saveDrafts(drafts: Record<string, string>): Promise<void> {
+  // Newest known tasks first: queued > being written > last written > disk.
+  const base = queued ?? inFlight ?? lastWritten ?? (await loadState().catch(() => null));
+  if (!base) return; // nothing to merge into yet; the next full save carries them
+  saveState({ ...base, drafts });
 }
