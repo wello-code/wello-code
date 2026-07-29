@@ -302,6 +302,25 @@ export interface PersistedState {
   /** Unsent composer drafts by chat id — restored so a half-typed message
    *  survives a restart. Absent in states written by pre-2026-07-18 builds. */
   drafts?: Record<string, string>;
+  /** True when this came from the old single-file format, so the renderer knows
+   *  every chat still has to be written out once (the per-chat migration). */
+  legacy?: boolean;
+}
+
+/**
+ * What an autosave sends. Only the chats that actually changed travel (and get
+ * written); `taskIds` is the full ordered list, so deletions and reordering are
+ * always exact. Shipping every chat on every change is what put the whole
+ * history through the IPC boundary — and ten times its size into the main
+ * process — on each finished turn.
+ */
+export interface StateSavePayload {
+  workspace: WorkspaceInfo | null;
+  activeId: string | null;
+  /** Every chat id, in sidebar order. Anything not here is deleted from disk. */
+  taskIds: string[];
+  /** Full contents of the chats whose object identity changed since the last save. */
+  changed: unknown[];
 }
 
 /** A user-configured MCP connector (stdio command or remote endpoint). */
@@ -508,9 +527,9 @@ export interface WelloApi {
 
   // Durable session state (tasks + last workspace survive restarts).
   loadState(): Promise<PersistedState | null>;
-  saveState(state: PersistedState): Promise<void>;
-  /** Persist ONLY the composer drafts (merged into the last saved state), so
-   *  typing never re-serialises the whole chat history through the main process. */
+  saveState(payload: StateSavePayload): Promise<void>;
+  /** Persist ONLY the composer drafts (their own small file), so typing never
+   *  re-serialises the whole chat history through the main process. */
   saveDrafts(drafts: Record<string, string>): Promise<void>;
 
   // App settings (MCP connectors, plugins).

@@ -58,7 +58,7 @@ const api: WelloApi = {
     ipcRenderer.invoke("workspace.instructions", path) as Promise<{ file: string | null }>,
 
   loadState: () => ipcRenderer.invoke("state.load"),
-  saveState: (state) => ipcRenderer.invoke("state.save", state) as Promise<void>,
+  saveState: (payload) => ipcRenderer.invoke("state.save", payload) as Promise<void>,
   saveDrafts: (drafts: Record<string, string>) =>
     ipcRenderer.invoke("state.saveDrafts", drafts) as Promise<void>,
 

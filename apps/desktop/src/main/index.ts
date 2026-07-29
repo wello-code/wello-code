@@ -10,7 +10,7 @@ import type {
   AppSettings,
   Connection,
   HandoffOutcome,
-  PersistedState,
+  StateSavePayload,
   StartRunInput,
   WorkspaceInfo,
 } from "../shared/ipc-api";
@@ -44,7 +44,7 @@ import {
 } from "./auth-device";
 import { AgentRuntime } from "./agent-runtime";
 import * as gitService from "./git";
-import { loadState, saveDrafts, saveState } from "./state-store";
+import { isChatId, loadState, saveDrafts, saveState } from "./state-store";
 import { hardwareAccelerationEnabledSync, loadSettings, saveSettings } from "./settings-store";
 import { cleanupPastes, savePastedImage, saveImageBuffer } from "./paste-store";
 import { readImageData, statPaths } from "./media";
@@ -444,8 +444,14 @@ function registerIpc(): void {
       ? instructionsInfo(path)
       : { file: null },
   );
-  ipcMain.handle("state.save", (_e, state: PersistedState): void => {
-    saveState(state);
+  ipcMain.handle("state.save", (_e, payload: StateSavePayload): void => {
+    if (!payload || typeof payload !== "object") return;
+    saveState({
+      workspace: payload.workspace ?? null,
+      activeId: typeof payload.activeId === "string" ? payload.activeId : null,
+      taskIds: Array.isArray(payload.taskIds) ? payload.taskIds.filter(isChatId) : [],
+      changed: Array.isArray(payload.changed) ? payload.changed : [],
+    });
   });
   ipcMain.handle("state.saveDrafts", (_e, drafts: unknown): Promise<void> => {
     // Renderer input: keep only string→string pairs, so a malformed payload can

@@ -806,15 +806,29 @@ function Workspace({
     [],
   );
 
+  // Chats already on disk, by identity: the reducer returns a NEW object only for
+  // the chat it touched, so an identity check is an exact "what changed" diff.
+  const savedChats = useRef(new Map<string, unknown>());
+
   // Restore the previous session (tasks + last workspace + composer drafts) once.
   useEffect(() => {
     void window.wello.loadState().then((persisted) => {
       if (persisted) {
         if (persisted.workspace) setWorkspace(persisted.workspace);
         if (persisted.drafts) draftsRef.current = new Map(Object.entries(persisted.drafts));
+        const restored = persisted.tasks as TaskItem[];
+        // Everything restored is already on disk, so the first autosave has
+        // nothing to write. The exception is a state file in the old one-file
+        // format: leaving the map empty marks every chat as changed, which is
+        // exactly the migration (each chat gets its own file on the next save).
+        if (!persisted.legacy) {
+          const seen = new Map<string, unknown>();
+          for (const t of restored) seen.set(t.id, t);
+          savedChats.current = seen;
+        }
         dispatch({
           type: "hydrate",
-          tasks: persisted.tasks as TaskItem[],
+          tasks: restored,
           activeId: persisted.activeId,
         });
         // Put the active chat's saved draft back into the composer.
@@ -844,21 +858,25 @@ function Workspace({
   // Debounced autosave — but never before the restore finished (an early save
   // would clobber the previous session with an empty one).
   //
-  // ⚠️ Deliberately NOT keyed on the composer text. This effect ships the entire
-  // history of every chat across the IPC boundary, where it is deep-copied and
-  // serialised; with `prompt` in the deps that happened on every pause in typing,
-  // so a long-lived window churned tens of MB through the main process for a few
-  // typed characters — reported in the field as a main process holding well over
-  // a gigabyte. Typing now takes the drafts-only path below.
+  // ⚠️ Two things this deliberately does NOT do, both measured 2026-07-29.
+  // It is not keyed on the composer text: with `prompt` in the deps, every pause
+  // in typing shipped the entire history across IPC to be deep-copied and
+  // re-serialised. And it does not send every chat: only the ones whose contents
+  // changed. Sending all of them put ~10x the history's size into the main
+  // process (a user's archive had it holding 1292 MB two minutes after launch).
   useEffect(() => {
     if (!hydrated.current) return;
     const id = setTimeout(() => {
+      const seen = savedChats.current;
+      const changed = state.tasks.filter((t) => seen.get(t.id) !== t);
+      const next = new Map<string, unknown>();
+      for (const t of state.tasks) next.set(t.id, t);
+      savedChats.current = next;
       void window.wello.saveState({
-        version: 1,
         workspace,
         activeId: state.activeId,
-        tasks: state.tasks,
-        drafts: draftsForSave.current(),
+        taskIds: state.tasks.map((t) => t.id),
+        changed,
       });
     }, 600);
     return () => clearTimeout(id);
