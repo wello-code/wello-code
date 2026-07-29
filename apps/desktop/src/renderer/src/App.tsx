@@ -1843,14 +1843,16 @@ function Workspace({
     setPrompt((prev) => (prev && !prev.endsWith("\n") ? `${prev}\n${text}` : `${prev}${text}`));
     setAttachments((prev) => prev.filter((x) => x.id !== id));
     // Focus with the caret at the very end, so typing continues after the paste
-    // rather than in front of it.
-    requestAnimationFrame(() => {
+    // rather than in front of it. ⚠️ setTimeout, NOT requestAnimationFrame: rAF
+    // does not fire while the window is hidden or occluded (a minimised app, and
+    // headless CI), which would leave the caret wherever it was.
+    setTimeout(() => {
       const el = composerRef.current;
       if (!el) return;
       el.focus();
       el.selectionStart = el.selectionEnd = el.value.length;
       el.scrollTop = el.scrollHeight;
-    });
+    }, 0);
   };
 
   /** Screenshots become image chips; big text pastes become a text chip. */
