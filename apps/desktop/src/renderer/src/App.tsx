@@ -1834,6 +1834,25 @@ function Workspace({
     await materializeImages(accepted.map((i) => items[i]!));
   };
 
+  /**
+   * Put a folded paste back into the composer, at the end of whatever is typed,
+   * and drop its chip. Asked for by a user who wanted to see and edit the text
+   * he had pasted instead of a "24 lines" card.
+   */
+  const expandPaste = (id: string, text: string): void => {
+    setPrompt((prev) => (prev && !prev.endsWith("\n") ? `${prev}\n${text}` : `${prev}${text}`));
+    setAttachments((prev) => prev.filter((x) => x.id !== id));
+    // Focus with the caret at the very end, so typing continues after the paste
+    // rather than in front of it.
+    requestAnimationFrame(() => {
+      const el = composerRef.current;
+      if (!el) return;
+      el.focus();
+      el.selectionStart = el.selectionEnd = el.value.length;
+      el.scrollTop = el.scrollHeight;
+    });
+  };
+
   /** Screenshots become image chips; big text pastes become a text chip. */
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>): void => {
     const images = Array.from(e.clipboardData.items).filter(
@@ -3114,6 +3133,20 @@ ${t.workspaceName}` : t.title
                         />
                       )}
                       <span className="attachchip__label">{attachmentLabel(a)}</span>
+                      {a.kind === "paste" ? (
+                        // A long paste is folded into a chip so the composer stays
+                        // readable, but sometimes you want the text itself in front
+                        // of you: to edit it, to cut it down, to write around it.
+                        // This drops it into the field and takes the chip away.
+                        <button
+                          className="attachchip__x"
+                          title="Развернуть в поле ввода"
+                          aria-label="Развернуть вставку в поле ввода"
+                          onClick={() => expandPaste(a.id, a.text)}
+                        >
+                          <Icon name="chevrondown" size={10} />
+                        </button>
+                      ) : null}
                       <button
                         className="attachchip__x"
                         title="Убрать"
