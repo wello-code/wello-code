@@ -10,15 +10,39 @@ import { useFocusTrap } from "./use-focus-trap";
  * cached per path for the session.
  */
 
+/**
+ * Path → its data URL, kept for the session so scrolling back to a picture does
+ * not re-read it. Bounded: a base64 data URL is a third bigger than the file, so
+ * a long session with a picture in every other message would otherwise hold
+ * hundreds of megabytes of strings in the window. Oldest goes first (a Map keeps
+ * insertion order).
+ */
+const CACHE_MAX_CHARS = 48 * 1024 * 1024;
 const dataUrlCache = new Map<string, Promise<string | null>>();
+let cachedChars = 0;
+
+function remember(path: string, pending: Promise<string | null>): void {
+  dataUrlCache.set(path, pending);
+  void pending.then((data) => {
+    cachedChars += data?.length ?? 0;
+    while (cachedChars > CACHE_MAX_CHARS && dataUrlCache.size > 1) {
+      const oldest = dataUrlCache.keys().next();
+      if (oldest.done || oldest.value === path) break;
+      const dropped = dataUrlCache.get(oldest.value);
+      dataUrlCache.delete(oldest.value);
+      void dropped?.then((d) => {
+        cachedChars -= d?.length ?? 0;
+      });
+    }
+  });
+}
 
 function loadImage(path: string): Promise<string | null> {
-  let pending = dataUrlCache.get(path);
-  if (!pending) {
-    pending = window.wello.readImageData(path).catch(() => null);
-    dataUrlCache.set(path, pending);
-  }
-  return pending;
+  const pending = dataUrlCache.get(path);
+  if (pending) return pending;
+  const fresh = window.wello.readImageData(path).catch(() => null);
+  remember(path, fresh);
+  return fresh;
 }
 
 /** undefined = loading, null = unavailable (deleted/oversized), string = data URL. */

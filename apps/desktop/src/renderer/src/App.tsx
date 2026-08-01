@@ -65,6 +65,7 @@ import { loadDockPrefs, restorablePanels, saveDockPrefs } from "./dock-layout";
 import { DOCK_MIN, PanelDock, type PanelId } from "./Panels";
 import { Markdown, MarkdownBody } from "./Markdown";
 import { splitStreaming } from "./stream-split";
+import { shrinkImage } from "./image-shrink";
 import { SettingsView } from "./Settings";
 import {
   loadLastSettingsPage,
@@ -87,7 +88,7 @@ function fmtElapsed(ms: number): string {
 type Attachment =
   | { kind: "file"; id: string; path: string }
   | { kind: "folder"; id: string; path: string }
-  | { kind: "image"; id: string; path: string; preview?: string }
+  | { kind: "image"; id: string; path: string; preview?: string; originalPath?: string }
   | { kind: "paste"; id: string; label: string; text: string };
 
 function baseName(p: string): string {
@@ -111,7 +112,13 @@ function buildPrompt(text: string, atts: Attachment[]): string {
   if (images.length > 0) {
     parts.push(
       "Прикреплённые изображения (открой каждое инструментом Read, чтобы увидеть):\n" +
-        images.map((a) => `- ${a.path}`).join("\n"),
+        images
+          .map((a) =>
+            // A shrunk picture names its source too, so a request like "поправь
+            // этот макет" still has the real file to work on.
+            a.originalPath ? `- ${a.path} (уменьшенная копия ${a.originalPath})` : `- ${a.path}`,
+          )
+          .join("\n"),
     );
   }
   for (const a of atts) {
@@ -1806,15 +1813,27 @@ function Workspace({
   const materializeImages = async (items: { blob: Blob; knownPath?: string }[]): Promise<void> => {
     const adds: Extract<Attachment, { kind: "image" }>[] = [];
     for (const it of items) {
-      // Clipboard images are written to disk first; dropped files already live there.
+      // Oversized pictures are shrunk to what the model actually sees (see
+      // image-shrink.ts): the conversation carries them on EVERY later turn, so
+      // the megabytes we don't send are megabytes we don't send again and again.
+      const small = await shrinkImage(it.blob).catch(() => null);
+      const blob = small ?? it.blob;
+      // Clipboard images are written to disk first; dropped files already live
+      // there — unless we shrank one, and then the copy goes to our own folder
+      // and the original file on the user's disk is left untouched.
       const path =
-        it.knownPath ??
-        (it.blob.size > 0
-          ? await window.wello.savePastedImage(await it.blob.arrayBuffer(), it.blob.type || "image/png")
-          : null);
+        (small || !it.knownPath) && blob.size > 0
+          ? await window.wello.savePastedImage(await blob.arrayBuffer(), blob.type || "image/png")
+          : (it.knownPath ?? null);
       if (!path) continue;
-      const preview = await blobToDataUrl(it.blob);
-      adds.push({ kind: "image", id: crypto.randomUUID(), path, preview: preview ?? undefined });
+      const preview = await blobToDataUrl(blob);
+      adds.push({
+        kind: "image",
+        id: crypto.randomUUID(),
+        path,
+        ...(small && it.knownPath ? { originalPath: it.knownPath } : {}),
+        preview: preview ?? undefined,
+      });
     }
     if (adds.length > 0) {
       setAttachments((prev) => [
