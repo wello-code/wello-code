@@ -1,17 +1,17 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { mkdir, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
-// snapshot.ts reads app.getPath('userData'); point it at a throwaway dir. The
-// factory closes over `userData`, which is only READ when getPath() is called
-// (inside tests), by which point beforeAll has assigned it.
+// The store is told where to live (the app passes userData; the worker gets it
+// over workerData) — point it at a throwaway dir.
 let userData = "";
-vi.mock("electron", () => ({ app: { getPath: () => userData } }));
 
 import {
   captureCheckpoint,
+  configureSnapshots,
   ensureBaseline,
   gc,
   hasCheckpoint,
@@ -22,9 +22,11 @@ import {
   snapshotRevertFile,
   snapshotSummary,
 } from "./snapshot";
+import { storeBytes } from "./object-store";
 
 beforeAll(() => {
   userData = mkdtempSync(join(tmpdir(), "wello-snap-ud-"));
+  configureSnapshots(userData);
 });
 
 async function newWorkspace(): Promise<string> {
@@ -186,8 +188,11 @@ describe("checkpoints (rewind)", () => {
     await captureCheckpoint("task-blob", "run-1", ws);
     // Wipe the object store: the scan hint still lists the file, but its bytes
     // are gone — the next checkpoint has to read and store it again, or a rewind
-    // would silently do nothing.
+    // would silently do nothing. (configureSnapshots also drops the in-memory
+    // index, which is what a restart would do.)
+    await rm(join(userData, "review-snapshots", "packs"), { recursive: true, force: true });
     await rm(join(userData, "review-snapshots", "objects"), { recursive: true, force: true });
+    configureSnapshots(userData);
     await captureCheckpoint("task-blob", "run-2", ws);
 
     await writeFile(join(ws, "f.ts"), "changed\n");
@@ -209,10 +214,10 @@ describe("checkpoints (rewind)", () => {
   });
 
   // The regression this pins is the one users felt: a checkpoint runs before
-  // EVERY turn, and re-reading the whole project each time froze the app for
-  // tens of seconds on a real repo. The second checkpoint must ride on the
-  // first one's scan. Ratio, not milliseconds, so a slow CI box still passes.
-  it("a repeat checkpoint costs a fraction of the first one", async () => {
+  // EVERY turn, and re-reading (and re-storing) the whole project each time
+  // froze the app for tens of seconds on a real repo. Bytes, not milliseconds —
+  // a repeat that stores nothing is the invariant; a stopwatch on CI is noise.
+  it("a repeat checkpoint re-reads and re-stores nothing", async () => {
     const ws = await newWorkspace();
     const body = `// ${"x".repeat(80)}\n`.repeat(250); // ~20 KB per file
     await mkdir(join(ws, "src"), { recursive: true });
@@ -220,28 +225,47 @@ describe("checkpoints (rewind)", () => {
       await writeFile(join(ws, "src", `mod${i}.ts`), `export const id = ${i};\n${body}`);
     }
 
+    const empty = await storeBytes();
     const t0 = Date.now();
     await captureCheckpoint("task-cost", "run-1", ws);
     const first = Date.now() - t0;
+    const afterFirst = await storeBytes();
+    expect(afterFirst).toBeGreaterThan(empty); // the tree really was stored
+
     const t1 = Date.now();
     await captureCheckpoint("task-cost", "run-2", ws);
     const second = Date.now() - t1;
 
-    expect(second).toBeLessThan(first / 2);
+    expect(await storeBytes()).toBe(afterFirst); // nothing re-read, nothing re-stored
+    expect(second).toBeLessThanOrEqual(first);
+  }, 60_000);
+
+  // 400 files used to mean 400 file creations in the object store, each one a
+  // few milliseconds on Windows — the single most expensive thing the app did.
+  it("stores a whole tree in a handful of files, not one per blob", async () => {
+    const ws = await newWorkspace();
+    await mkdir(join(ws, "src"), { recursive: true });
+    for (let i = 0; i < 400; i++) {
+      await writeFile(join(ws, "src", `f${i}.ts`), `export const n = ${i};\n${"y".repeat(500)}`);
+    }
+    await captureCheckpoint("task-pack", "run-1", ws);
+
+    const packs = await readdir(join(userData, "review-snapshots", "packs"));
+    expect(packs.length).toBeLessThanOrEqual(4); // pack + index, maybe one roll
   }, 60_000);
 
   it("gc adopts a pre-shared-store task's blobs instead of stranding them", async () => {
     const ws = await newWorkspace();
-    await writeFile(join(ws, "old.ts"), "bytes from an older version\n");
+    const body = "bytes from an older version\n";
+    await writeFile(join(ws, "old.ts"), body);
     await captureCheckpoint("task-legacy", "run-1", ws);
-    // Simulate the old layout: the blob lives in the task's own folder only.
-    const objects = join(userData, "review-snapshots", "objects");
+    // Simulate the old layout: the blob lives in the task's own folder only,
+    // one file per hash, and the shared store knows nothing about it.
     const legacy = join(userData, "review-snapshots", "task-legacy", "objects");
     await mkdir(legacy, { recursive: true });
-    for (const name of await readdir(objects)) {
-      await writeFile(join(legacy, name), await readFile(join(objects, name)));
-    }
-    await rm(objects, { recursive: true, force: true });
+    await writeFile(join(legacy, createHash("sha256").update(body).digest("hex")), body);
+    await rm(join(userData, "review-snapshots", "packs"), { recursive: true, force: true });
+    configureSnapshots(userData);
 
     await gc(["task-legacy"]);
 
@@ -249,25 +273,26 @@ describe("checkpoints (rewind)", () => {
     expect(await exists(legacy)).toBe(false);
     await writeFile(join(ws, "old.ts"), "changed\n");
     expect(await restoreCheckpoint("task-legacy", "run-1", ws)).toBe(true);
-    expect(await readFile(join(ws, "old.ts"), "utf8")).toBe("bytes from an older version\n");
+    expect(await readFile(join(ws, "old.ts"), "utf8")).toBe(body);
   }, 30_000);
 
   it("gc drops blobs no task references and keeps the ones still used", async () => {
     const ws = await newWorkspace();
-    await writeFile(join(ws, "live.ts"), "kept by task-live\n");
+    // Blobs big enough that the sweep's "is this worth a rewrite" rule fires on
+    // the ratio (half the store is about to become garbage).
+    const kept = `kept by task-live\n${"a".repeat(40_000)}`;
+    await writeFile(join(ws, "live.ts"), kept);
     await captureCheckpoint("task-live", "run-1", ws);
-    await writeFile(join(ws, "live.ts"), "only task-dead has these bytes\n");
+    await writeFile(join(ws, "live.ts"), `only task-dead has these bytes\n${"b".repeat(40_000)}`);
     await captureCheckpoint("task-dead", "run-1", ws);
 
-    const objects = join(userData, "review-snapshots", "objects");
-    const before = (await readdir(objects)).length;
+    const before = await storeBytes();
     await gc(["task-live"]);
-    const after = await readdir(objects);
-    expect(after.length).toBeLessThan(before);
+    expect(await storeBytes()).toBeLessThan(before);
     // The surviving task can still rewind.
     await writeFile(join(ws, "live.ts"), "changed again\n");
     expect(await restoreCheckpoint("task-live", "run-1", ws)).toBe(true);
-    expect(await readFile(join(ws, "live.ts"), "utf8")).toBe("kept by task-live\n");
+    expect(await readFile(join(ws, "live.ts"), "utf8")).toBe(kept);
     expect(await exists(join(userData, "review-snapshots", "task-dead"))).toBe(false);
   }, 30_000);
 

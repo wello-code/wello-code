@@ -59,7 +59,7 @@ import {
   setWorkspaceTrust,
 } from "./workspace-prefs";
 import * as reviewService from "./review";
-import * as snapshot from "./snapshot";
+import * as snapshot from "./snapshot-host";
 import * as previewServer from "./preview-server";
 import { perfReportText, startPerfWatch } from "./perf-watch";
 import { resolvePreviewRoot } from "./preview-root";
@@ -582,28 +582,22 @@ function registerIpc(): void {
   // --- Agent --------------------------------------------------------------
   ipcMain.handle("agent.start", async (_e, input: StartRunInput): Promise<void> => {
     if (allowWorkspace(input.workspacePath)) {
-      // For a plain (non-git) folder, capture the pre-run baseline for snapshot
-      // review BEFORE the agent's first write — awaited so nothing leaks in.
+      // Before the agent's first write, and awaited so nothing leaks into it:
+      //  · a plain folder gets the full snapshot baseline;
+      //  · a git repo records what was ALREADY uncommitted, so the review pane
+      //    can tell the agent's work from the user's (see review.ts);
+      //  · either way a per-turn checkpoint, so "rewind to this turn" can put
+      //    the project back.
+      // One call, one tree scan, in the snapshot worker — this is the second or
+      // two before a turn starts, and it used to run in the main process.
       const st = await gitService.status(input.workspacePath);
-      if (!st.isRepo) {
-        await snapshot.ensureBaseline(input.taskId, input.workspacePath).catch(() => undefined);
-      } else {
-        // Git repo: record what was ALREADY uncommitted, so the review pane can
-        // tell the agent's work from the user's (see review.ts). Awaited for the
-        // same reason as the snapshot — it must precede the first write.
-        await snapshot
-          .ensureGitBaseline(
-            input.taskId,
-            input.workspacePath,
-            st.files.map((f) => f.path),
-          )
-          .catch(() => undefined);
-      }
-      // A per-turn checkpoint (git OR not) so "rewind to this turn" can restore
-      // the project to its pre-turn state. Labelled by the run id; awaited so the
-      // snapshot precedes any edit. Best-effort — never blocks the run.
       await snapshot
-        .captureCheckpoint(input.taskId, input.runId, input.workspacePath)
+        .prepareTurn(
+          input.taskId,
+          input.runId,
+          input.workspacePath,
+          st.isRepo ? st.files.map((f) => f.path) : null,
+        )
         .catch(() => undefined);
     }
     // Fire-and-forget: events stream over the push channel; never block the caller
@@ -1173,4 +1167,5 @@ app.on("before-quit", (event) => {
   void stopPreview();
   devServers.killAll();
   terminals.killAll();
+  snapshot.stopSnapshotWorker();
 });

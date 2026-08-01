@@ -1,6 +1,6 @@
 import type { ChangeSummary } from "../shared/ipc-api";
 import * as gitService from "./git";
-import * as snapshot from "./snapshot";
+import * as snapshot from "./snapshot-host";
 
 /**
  * Change-review dispatcher: a real git repo uses git; a plain folder falls back

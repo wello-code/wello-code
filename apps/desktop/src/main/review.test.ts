@@ -6,12 +6,14 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
-// snapshot.ts (used by review.ts) reads app.getPath('userData').
+// review.ts reaches the snapshot store through its worker host, which asks
+// Electron where userData is (and falls back to running in-process, which is
+// what happens here — there is no built worker file next to a .ts source).
 let userData = "";
 vi.mock("electron", () => ({ app: { getPath: () => userData } }));
 
 import { summary, revertAll } from "./review";
-import { ensureGitBaseline } from "./snapshot";
+import { configureSnapshots, ensureGitBaseline } from "./snapshot";
 import { commitAll, init } from "./git";
 
 const exec = promisify(execFile);
@@ -24,6 +26,7 @@ const exec = promisify(execFile);
  */
 beforeAll(() => {
   userData = mkdtempSync(join(tmpdir(), "wello-review-ud-"));
+  configureSnapshots(userData);
 });
 
 async function newRepo(): Promise<string> {

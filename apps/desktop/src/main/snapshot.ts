@@ -10,9 +10,16 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { app } from "electron";
 import type { ChangedFile, ChangeSummary } from "../shared/ipc-api";
 import { lineDiff } from "./line-diff";
+import {
+  adoptTaskObjects,
+  configureObjectStore,
+  haveObject,
+  readObject,
+  storeObjects,
+  sweepObjects,
+} from "./object-store";
 
 /**
  * Git-less change review: a per-task, content-addressed snapshot of the workspace
@@ -28,6 +35,8 @@ const MAX_FILES = 4000;
  *  are not — going wide on both is what turns a minute of scanning into seconds. */
 const STAT_CONCURRENCY = 32;
 const READ_CONCURRENCY = 12;
+/** How many bytes of file contents may be in memory before they are stored. */
+const STORE_BATCH_BYTES = 16 * 1024 * 1024;
 
 /** Directories never snapshotted (noise / huge / build output) — mirrors the picker. */
 const IGNORE_DIRS = new Set([
@@ -36,7 +45,7 @@ const IGNORE_DIRS = new Set([
   ".idea", ".gradle", "bin", "obj",
 ]);
 
-interface SnapshotFileMeta {
+export interface SnapshotFileMeta {
   hash: string;
   size: number;
   mtimeMs: number;
@@ -56,46 +65,28 @@ export function sanitizeTaskId(id: string): string {
   return id;
 }
 
+/**
+ * Where snapshots live. Set once at startup (and by the tests) instead of read
+ * from `app.getPath` — this module runs in a worker thread, where the Electron
+ * API does not exist.
+ */
+let snapshotsDir = "";
+
+/** Point the snapshot store at `<userData>/review-snapshots`. */
+export function configureSnapshots(userDataDir: string): void {
+  snapshotsDir = join(userDataDir, "review-snapshots");
+  configureObjectStore(snapshotsDir);
+  lastScan.clear();
+}
+
 function snapshotsRoot(): string {
-  return join(app.getPath("userData"), "review-snapshots");
+  // Refuse rather than resolve against the working directory: an unconfigured
+  // store would quietly scatter packs and manifests wherever the app was started.
+  if (!snapshotsDir) throw new Error("Snapshot store is not configured.");
+  return snapshotsDir;
 }
 function taskDir(taskId: string): string {
   return join(snapshotsRoot(), sanitizeTaskId(taskId));
-}
-/**
- * Blobs live in ONE store for the whole app, keyed by content hash.
- *
- * They used to be per task, which meant a second chat on the same project paid
- * for the entire tree again — both in time (read + hash + copy every file) and
- * in disk (a 120 MB project cost 120 MB per chat). Same content, same hash, so
- * one store serves every task; `gc` sweeps blobs nothing references anymore.
- */
-function objectsDir(): string {
-  return join(snapshotsRoot(), "objects");
-}
-function objectPath(hash: string): string {
-  return join(objectsDir(), hash);
-}
-/** Where a pre-shared-store build kept this blob (still read, never written). */
-function legacyObjectPath(taskId: string, hash: string): string {
-  return join(taskDir(taskId), "objects", hash);
-}
-/** A hash out of a manifest becomes a path segment — only ever a sha256 digest. */
-function isHash(hash: string): boolean {
-  return /^[0-9a-f]{64}$/.test(hash);
-}
-/** True when the blob is available to restore from (shared store or a legacy one). */
-async function hasObject(taskId: string, hash: string): Promise<boolean> {
-  if (!isHash(hash)) return false;
-  if (await stat(objectPath(hash)).catch(() => null)) return true;
-  return Boolean(await stat(legacyObjectPath(taskId, hash)).catch(() => null));
-}
-/** Blob bytes, from wherever this task's snapshot era put them. */
-async function readObject(taskId: string, hash: string): Promise<Buffer | null> {
-  if (!isHash(hash)) return null;
-  const shared = await readFile(objectPath(hash)).catch(() => null);
-  if (shared) return shared;
-  return readFile(legacyObjectPath(taskId, hash)).catch(() => null);
 }
 
 /** Reject any path that escapes the workspace (same contract as git/workspace-files). */
@@ -119,16 +110,22 @@ async function realInside(cwd: string, abs: string): Promise<string | null> {
   }
 }
 
-/** Same check with the workspace's real path already resolved (per-file in a
- *  whole-tree scan, resolving it again for every file is thousands of syscalls). */
-async function realInsideCached(realCwd: string, abs: string): Promise<string | null> {
-  try {
-    const realTarget = await realpath(abs);
-    const rel = relative(realCwd, realTarget);
-    return rel !== "" && (rel.startsWith("..") || isAbsolute(rel)) ? null : realTarget;
-  } catch {
-    return abs;
+/** Split `items` into runs whose declared sizes stay under `limit` bytes. */
+function chunkByBytes<T extends { size: number }>(items: T[], limit: number): T[][] {
+  const out: T[][] = [];
+  let run: T[] = [];
+  let bytes = 0;
+  for (const item of items) {
+    if (run.length > 0 && bytes + item.size > limit) {
+      out.push(run);
+      run = [];
+      bytes = 0;
+    }
+    run.push(item);
+    bytes += item.size;
   }
+  if (run.length > 0) out.push(run);
+  return out;
 }
 
 /** Run `fn` over `items` with at most `limit` in flight; results keep input order. */
@@ -225,6 +222,12 @@ async function rememberScan(cwd: string, files: Record<string, SnapshotFileMeta>
   }
 }
 
+/** One pass over the tree: every eligible file's hash, plus whether caps cut it short. */
+export interface Scan {
+  files: Record<string, SnapshotFileMeta>;
+  partial: boolean;
+}
+
 /**
  * Hash the whole tree into the shared object store.
  *
@@ -237,24 +240,29 @@ async function scanTree(
   taskId: string,
   cwd: string,
   previous: Record<string, SnapshotFileMeta> | null,
-): Promise<{ files: Record<string, SnapshotFileMeta>; partial: boolean }> {
+): Promise<Scan> {
   const files: Record<string, SnapshotFileMeta> = {};
   let partial = false;
   const rels = await walk(cwd);
   if (rels.length >= MAX_FILES) partial = true;
-  await mkdir(objectsDir(), { recursive: true });
-  const realCwd = await realpath(cwd).catch(() => cwd);
 
   // 1. Stat everything in parallel — thousands of round trips one after another
   //    is what made a scan take tens of seconds on a real project.
+  //
+  //    ⚠️ Deliberately NO realpath per file. `walk` skips every symlink and
+  //    junction (a reparse point is a link to libuv), so nothing it returns can
+  //    reach outside the tree, and the paths are ours, not the user's — the `..`
+  //    guard below is what makes that true. Resolving each one anyway cost a
+  //    second syscall per file: 0.47 s on a 3000-file project, EVERY turn.
+  //    The write paths (revert, restore) still resolve, and must: they take
+  //    paths from a manifest and put bytes on disk.
   const stats = await mapLimit(rels, STAT_CONCURRENCY, async (rel) => {
-    let real: string | null;
+    let real: string;
     try {
-      real = await realInsideCached(realCwd, assertInside(cwd, rel));
+      real = assertInside(cwd, rel);
     } catch {
       return null; // path escapes the workspace — not ours to record
     }
-    if (!real) return null;
     const info = await stat(real).catch(() => null);
     if (!info || !info.isFile()) return null;
     return { rel, real, size: info.size, mtimeMs: info.mtimeMs };
@@ -279,10 +287,12 @@ async function scanTree(
     toRead.push(entry);
   }
 
-  // 3. A re-used hash is only good while its blob is still in the store.
+  // 3. A re-used hash is only good while its blob is still in the store. The
+  //    store answers from its in-memory index, so this is a map lookup per file
+  //    rather than the stat storm it used to be (0.6 s per turn on 3000 files).
   const reused = Object.entries(files);
   const present = await mapLimit(reused, STAT_CONCURRENCY, ([, meta]) =>
-    hasObject(taskId, meta.hash),
+    haveObject(meta.hash, taskId),
   );
   reused.forEach(([rel, meta], i) => {
     if (!present[i]) {
@@ -291,23 +301,24 @@ async function scanTree(
     }
   });
 
-  // 4. Read + hash + store only what actually changed.
-  const stored = await mapLimit(toRead, READ_CONCURRENCY, async (entry) => {
-    const buf = await readFile(entry.real).catch(() => null);
-    if (!buf) return null;
-    const hash = createHash("sha256").update(buf).digest("hex");
-    const obj = objectPath(hash);
-    if (!(await stat(obj).catch(() => null))) {
-      const tmp = `${obj}.${process.pid}.tmp`;
-      await writeFile(tmp, buf);
-      await rename(tmp, obj);
-    }
-    return {
-      rel: entry.rel,
-      meta: { hash, size: entry.size, mtimeMs: entry.mtimeMs, binary: isBinary(buf) },
-    };
-  });
-  for (const s of stored) if (s) files[s.rel] = s.meta;
+  // 4. Read + hash + store only what actually changed, in chunks: the bytes are
+  //    held in memory until the batch is appended, and a 128 MB tree must not
+  //    become 128 MB of heap.
+  for (const chunk of chunkByBytes(toRead, STORE_BATCH_BYTES)) {
+    const read = await mapLimit(chunk, READ_CONCURRENCY, async (entry) => {
+      const buf = await readFile(entry.real).catch(() => null);
+      if (!buf) return null;
+      const hash = createHash("sha256").update(buf).digest("hex");
+      return {
+        rel: entry.rel,
+        buf,
+        meta: { hash, size: entry.size, mtimeMs: entry.mtimeMs, binary: isBinary(buf) },
+      };
+    });
+    const batch = read.filter((r): r is NonNullable<typeof r> => r !== null);
+    await storeObjects(batch.map((r) => ({ hash: r.meta.hash, buf: r.buf })));
+    for (const r of batch) files[r.rel] = r.meta;
+  }
   return { files, partial };
 }
 
@@ -331,21 +342,49 @@ async function writeManifest(taskId: string, manifest: SnapshotManifest): Promis
  * Capture the pre-run baseline for a task (idempotent — no-op once a manifest
  * exists). Best-effort: caller awaits this BEFORE the agent's first write so edits
  * don't leak into the base. Caps trip `partial`, not a throw.
+ *
+ * Returns the scan it took, or null when there was nothing to do — `prepareTurn`
+ * hands it straight to the checkpoint instead of walking the tree twice.
  */
-export async function ensureBaseline(taskId: string, cwd: string): Promise<void> {
+export async function ensureBaseline(taskId: string, cwd: string): Promise<Scan | null> {
   sanitizeTaskId(taskId);
-  if (await loadManifest(taskId)) return;
-  const { files, partial } = await scanTree(taskId, cwd, await loadLastScan(cwd));
+  if (await loadManifest(taskId)) return null;
+  const scan = await scanTree(taskId, cwd, await loadLastScan(cwd));
   await writeManifest(taskId, {
     version: 1,
     createdAt: new Date().toISOString(),
     root: cwd,
-    partial,
-    files,
+    partial: scan.partial,
+    files: scan.files,
   });
-  // The turn's checkpoint runs right after this one — hand it the scan so the
-  // very first turn walks the tree once instead of reading it twice.
-  await rememberScan(cwd, files);
+  await rememberScan(cwd, scan.files);
+  return scan;
+}
+
+/**
+ * Everything that must happen BEFORE a turn runs, in one call and one tree scan.
+ *
+ * `dirtyPaths` is git's list of already-uncommitted files, or null for a plain
+ * folder (which gets the full snapshot baseline instead). Previously main made
+ * three separate calls here and the first turn of a task scanned the project
+ * twice; the scan is the expensive part, so it is taken once and reused.
+ */
+export async function prepareTurn(
+  taskId: string,
+  turnId: string,
+  cwd: string,
+  dirtyPaths: string[] | null,
+): Promise<void> {
+  sanitizeTaskId(taskId);
+  sanitizeCheckpointId(turnId);
+  let scan: Scan | null = null;
+  if (dirtyPaths === null) {
+    scan = await ensureBaseline(taskId, cwd).catch(() => null);
+  } else {
+    await ensureGitBaseline(taskId, cwd, dirtyPaths).catch(() => undefined);
+  }
+  if (!scan) scan = await scanTree(taskId, cwd, await loadLastScan(cwd));
+  await writeCheckpoint(taskId, turnId, cwd, scan);
 }
 
 /* ── Git baseline: what was ALREADY dirty when the task started ──────────────
@@ -361,7 +400,7 @@ const GIT_BASELINE_FILE = "git-baseline.json";
 /** Cap the pre-existing dirt we store: a huge uncommitted tree is not worth GBs. */
 const GIT_BASELINE_MAX_FILES = 500;
 
-interface GitBaseline {
+export interface GitBaseline {
   version: 1;
   createdAt: string;
   root: string;
@@ -388,7 +427,8 @@ export async function ensureGitBaseline(
   if (await loadGitBaseline(taskId)) return;
   const files: Record<string, SnapshotFileMeta> = {};
   let total = 0;
-  await mkdir(objectsDir(), { recursive: true });
+  let blobs: { hash: string; buf: Buffer }[] = [];
+  let held = 0;
   for (const rel of dirtyPaths.slice(0, GIT_BASELINE_MAX_FILES)) {
     let real: string | null;
     try {
@@ -403,15 +443,17 @@ export async function ensureGitBaseline(
     const buf = await readFile(real).catch(() => null);
     if (!buf) continue;
     const hash = createHash("sha256").update(buf).digest("hex");
-    const obj = objectPath(hash);
-    if (!(await stat(obj).catch(() => null))) {
-      const tmp = `${obj}.${process.pid}.tmp`;
-      await writeFile(tmp, buf);
-      await rename(tmp, obj);
-    }
+    blobs.push({ hash, buf });
+    held += buf.length;
     files[rel] = { hash, size: info.size, mtimeMs: info.mtimeMs, binary: isBinary(buf) };
     total += info.size;
+    if (held >= STORE_BATCH_BYTES) {
+      await storeObjects(blobs);
+      blobs = [];
+      held = 0;
+    }
   }
+  await storeObjects(blobs);
   const target = gitBaselinePath(taskId);
   await mkdir(dirname(target), { recursive: true });
   const tmp = `${target}.tmp`;
@@ -463,7 +505,7 @@ export async function restoreGitBaselineFile(taskId: string, cwd: string, rel: s
   const base = await loadGitBaseline(taskId);
   const meta = base?.files[rel];
   if (!meta) return false;
-  const buf = await readObject(taskId, meta.hash);
+  const buf = await readObject(meta.hash, taskId);
   if (!buf) return false;
   const abs = assertInside(cwd, rel);
   const parent = dirname(abs);
@@ -490,21 +532,20 @@ async function changedFiles(cwd: string, manifest: SnapshotManifest): Promise<Ch
   for (const rel of Object.keys(manifest.files)) {
     if (!currentSet.has(rel)) changes.push({ rel, status: "deleted" });
   }
-  const realCwd = await realpath(cwd).catch(() => cwd);
   // Runs after every turn, over the whole tree: stat wide, then hash only the
-  // few files whose size or mtime moved.
+  // few files whose size or mtime moved. No realpath per file, for the reason
+  // spelled out in `scanTree`.
   type Verdict =
     | { kind: "added"; rel: string }
     | { kind: "suspect"; rel: string; real: string; base: SnapshotFileMeta };
   const verdicts = await mapLimit<string, Verdict | null>(current, STAT_CONCURRENCY, async (rel) => {
     const base = manifest.files[rel];
-    let real: string | null;
+    let real: string;
     try {
-      real = await realInsideCached(realCwd, assertInside(cwd, rel));
+      real = assertInside(cwd, rel);
     } catch {
       return null;
     }
-    if (!real) return null;
     const info = await stat(real).catch(() => null);
     if (!info || !info.isFile()) return null;
     if (!base) return { kind: "added", rel };
@@ -525,7 +566,7 @@ async function changedFiles(cwd: string, manifest: SnapshotManifest): Promise<Ch
 
 async function baseText(taskId: string, meta: SnapshotFileMeta): Promise<string | null> {
   if (meta.binary) return null;
-  const buf = await readObject(taskId, meta.hash);
+  const buf = await readObject(meta.hash, taskId);
   return buf ? buf.toString("utf8") : null;
 }
 async function currentText(cwd: string, rel: string): Promise<string | null> {
@@ -589,7 +630,7 @@ export async function snapshotRevertFile(taskId: string, cwd: string, rel: strin
     if (real) await rm(real, { force: true });
     return;
   }
-  const buf = await readObject(taskId, base.hash);
+  const buf = await readObject(base.hash, taskId);
   if (!buf) return;
   // Confine the WRITE: realInside on the parent dir so a symlinked path can't land
   // bytes outside the workspace; create parent dirs only inside the tree.
@@ -629,7 +670,16 @@ function checkpointPath(taskId: string, turnId: string): string {
 export async function captureCheckpoint(taskId: string, turnId: string, cwd: string): Promise<void> {
   sanitizeTaskId(taskId);
   sanitizeCheckpointId(turnId);
-  const { files, partial } = await scanTree(taskId, cwd, await loadLastScan(cwd));
+  await writeCheckpoint(taskId, turnId, cwd, await scanTree(taskId, cwd, await loadLastScan(cwd)));
+}
+
+/** Persist a scan as this turn's checkpoint, and keep it as the folder's hint. */
+async function writeCheckpoint(
+  taskId: string,
+  turnId: string,
+  cwd: string,
+  { files, partial }: Scan,
+): Promise<void> {
   const target = checkpointPath(taskId, turnId);
   await mkdir(dirname(target), { recursive: true });
   const tmp = `${target}.tmp`;
@@ -677,7 +727,7 @@ export async function restoreCheckpoint(taskId: string, turnId: string, cwd: str
   }
   // Rewrite every checkpointed file to its recorded bytes (guarded write path).
   for (const [rel, meta] of Object.entries(manifest.files)) {
-    const buf = await readObject(taskId, meta.hash);
+    const buf = await readObject(meta.hash, taskId);
     if (!buf) continue;
     const abs = assertInside(cwd, rel);
     const parent = dirname(abs);
@@ -695,33 +745,6 @@ export async function restoreCheckpoint(taskId: string, turnId: string, cwd: str
 export async function forget(taskId: string): Promise<void> {
   if (!/^[A-Za-z0-9_-]+$/.test(taskId)) return;
   await rm(taskDir(taskId), { recursive: true, force: true }).catch(() => undefined);
-}
-
-/**
- * Move a task's own blob folder into the shared store (upgrade path).
- *
- * Before the shared store every task copied the whole project for itself, so an
- * install that has been through a few chats on one repo is carrying the same
- * bytes several times over — hundreds of megabytes each. Moving them in is a
- * rename inside one volume: near-free, and duplicates simply collapse onto the
- * hash that is already there. Anything unmovable stays where it is and keeps
- * being read from the legacy path.
- */
-async function adoptLegacyObjects(taskId: string): Promise<void> {
-  const dir = join(taskDir(taskId), "objects");
-  const names = await readdir(dir).catch(() => null);
-  if (!names) return; // nothing legacy here
-  await mkdir(objectsDir(), { recursive: true }).catch(() => undefined);
-  for (const name of names) {
-    if (!isHash(name)) continue; // stray tmp file — leave it to the sweep below
-    const target = objectPath(name);
-    if (await stat(target).catch(() => null)) {
-      await rm(join(dir, name), { force: true }).catch(() => undefined); // already shared
-      continue;
-    }
-    await rename(join(dir, name), target).catch(() => undefined);
-  }
-  await rm(dir, { recursive: true, force: true }).catch(() => undefined);
 }
 
 /** Every blob hash a task's manifests still point at. */
@@ -763,11 +786,13 @@ export async function gc(knownTaskIds: string[]): Promise<void> {
   const dirs = await readdir(snapshotsRoot(), { withFileTypes: true }).catch(() => []);
   for (const d of dirs) {
     if (!d.isDirectory()) continue;
-    if (d.name === "objects" || d.name === "scans") continue; // shared, not a task
+    // Shared, not a task: the pack store, the loose blobs an older build wrote,
+    // and the per-folder scan hints.
+    if (d.name === "objects" || d.name === "scans" || d.name === "packs") continue;
     if (!keep.has(d.name)) {
       await rm(join(snapshotsRoot(), d.name), { recursive: true, force: true }).catch(() => undefined);
     } else {
-      await adoptLegacyObjects(d.name);
+      await adoptTaskObjects(d.name);
     }
   }
   const live = new Set<string>();
@@ -776,14 +801,5 @@ export async function gc(knownTaskIds: string[]): Promise<void> {
     if (!hashes) return; // a manifest we could not read — leave every blob alone
     for (const h of hashes) live.add(h);
   }
-  const blobs = await readdir(objectsDir()).catch(() => [] as string[]);
-  for (const name of blobs) {
-    if (live.has(name)) continue;
-    if (name.endsWith(".tmp")) {
-      // Could be a write in flight; only sweep the ones a crash left behind.
-      const info = await stat(objectPath(name)).catch(() => null);
-      if (!info || Date.now() - info.mtimeMs < 60 * 60 * 1000) continue;
-    }
-    await rm(objectPath(name), { force: true }).catch(() => undefined);
-  }
+  await sweepObjects(live);
 }

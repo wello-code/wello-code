@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import react from "@vitejs/plugin-react";
 
@@ -20,6 +21,17 @@ const bundledMainDeps = ["electron-updater"];
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin({ exclude: [...workspacePkgs, ...bundledMainDeps] })],
+    build: {
+      rollupOptions: {
+        // A second entry, not an import: the snapshot store runs in a worker
+        // thread, and `new Worker(new URL("./snapshot-worker.js", …))` needs a
+        // real file next to the main bundle.
+        input: {
+          index: resolve(__dirname, "src/main/index.ts"),
+          "snapshot-worker": resolve(__dirname, "src/main/snapshot-worker.ts"),
+        },
+      },
+    },
   },
   preload: {
     plugins: [externalizeDepsPlugin({ exclude: workspacePkgs })],
