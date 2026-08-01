@@ -38,6 +38,14 @@ export type TimelineItem =
   | { kind: "plan"; id: string; steps: PlanStep[]; summary: string }
   | { kind: "note"; id: string; text: string; tone: "info" | "success" | "danger" | "cancelled" };
 
+/**
+ * How much of one subagent's log is kept. It is appended to for as long as the
+ * agent runs and is saved with the chat, so without a ceiling a long session of
+ * fleet work grows the chat file (and every autosave of it) without end. The
+ * newest entries are the ones the panel shows.
+ */
+const MAX_SUBAGENT_ENTRIES = 500;
+
 /** One spawned subagent (a Task tool call) with its own transcript. */
 export interface SubagentInfo {
   id: string;
@@ -447,7 +455,7 @@ function applyEvent(prev: AgentState, event: AgentEvent): AgentState {
                 // "done" (e.g. a settle signal the engine sent out of order).
                 status: s.status === "failed" ? s.status : "running",
                 finishedAt: s.status === "failed" ? s.finishedAt : null,
-                transcript: [...s.transcript, { entry, text }],
+                transcript: [...s.transcript, { entry, text }].slice(-MAX_SUBAGENT_ENTRIES),
               }
             : s,
         ),

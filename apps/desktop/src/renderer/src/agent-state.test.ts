@@ -339,3 +339,30 @@ describe("agentReducer · plan finalization on run end", () => {
     expect(partial.plan?.map((p) => p.status)).toEqual(["completed", "pending"]);
   });
 });
+
+describe("agentReducer · subagent transcript growth", () => {
+  it("keeps the newest entries and stops growing without end", () => {
+    const started = apply(
+      initialAgentState,
+      ev("tool.requested", {
+        id: "toolu_sub",
+        runId: "r1",
+        intent: { kind: "run_command", argv: ["Task"], cwd: "/w" },
+        summary: "Subagent · разведка",
+        status: "running",
+        risk: "low",
+        idempotencyKey: "toolu_sub",
+      }),
+    );
+    const chatty = apply(
+      started,
+      ...Array.from({ length: 700 }, (_, i) =>
+        ev("subagent.message", { toolUseId: "toolu_sub", text: `шаг ${i}`, entry: "text" }),
+      ),
+    );
+    const log = chatty.subagents[0]!.transcript;
+    expect(log.length).toBe(500);
+    expect(log[log.length - 1]!.text).toBe("шаг 699"); // the newest survives
+    expect(log[0]!.text).toBe("шаг 200"); // the oldest were dropped
+  });
+});
