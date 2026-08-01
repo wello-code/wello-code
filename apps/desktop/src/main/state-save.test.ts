@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 let userData = "";
 vi.mock("electron", () => ({ app: { getPath: () => userData } }));
 
-import { loadState, saveDrafts, saveState, saveStats } from "./state-store";
+import { loadState, saveDrafts, saveState, savesSettled, saveStats } from "./state-store";
 import type { StateSavePayload } from "../shared/ipc-api";
 
 beforeAll(() => {
@@ -36,8 +36,10 @@ function payload(chats: Record<string, unknown>[], changed?: Record<string, unkn
   };
 }
 
-/** Lets the queued write drain (fs I/O + one hop per queued payload). */
-const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 80));
+/** Waits for the queued write to actually drain. NOT a sleep: a fixed delay
+ *  passes on an idle machine and fails on a busy one, which is exactly the kind
+ *  of test that gets ignored when it goes red. */
+const settle = (): Promise<void> => savesSettled();
 
 describe("history is stored per chat, not as one file", () => {
   it("writes one file per chat plus a small index", async () => {

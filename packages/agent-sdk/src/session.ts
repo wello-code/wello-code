@@ -195,6 +195,16 @@ const WEB_SEARCH_SYSTEM_APPEND = [
  * rides this run's env (`pushAuthed`) — untrusted folders never get the token,
  * so there git must go through the tools, which push app-side.
  */
+/**
+ * ⚠️ Every word here is part of the system prompt, and the system prompt is the
+ * first thing the prompt cache keys on. A line that can differ between two turns
+ * of the SAME conversation invalidates the whole cached prefix — tens of
+ * thousands of tokens re-uploaded and re-processed while the user waits.
+ *
+ * That is why the account name is NOT in here: it is fetched from github.com and
+ * may simply not be known yet on the first turn of a session. Connectedness is a
+ * local fact and cannot flap; the login was decoration.
+ */
 export function githubSystemAppend(
   github?: { connected: boolean; login?: string },
   pushAuthed = false,
@@ -207,7 +217,7 @@ export function githubSystemAppend(
   ].join(" ");
   if (github?.connected && pushAuthed) {
     return [
-      `GitHub is CONNECTED in this app${github.login ? ` as "${github.login}"` : ""}.`,
+      "GitHub is CONNECTED in this app.",
       "git push/pull/fetch to github.com are ALREADY AUTHENTICATED (the app injects a",
       "scoped credential helper with the user's token) — just run git normally. To publish",
       `a project that has no GitHub repository yet, call \`${GITHUB_CREATE_REPO_TOOL}\`: it`,
@@ -218,7 +228,7 @@ export function githubSystemAppend(
   }
   if (github?.connected) {
     return [
-      `GitHub is CONNECTED in this app${github.login ? ` as "${github.login}"` : ""}, but`,
+      "GitHub is CONNECTED in this app, but",
       "plain `git push` is NOT authenticated in this restricted folder. Publish and push",
       `through \`${GITHUB_CREATE_REPO_TOOL}\` instead — it creates the repo, attaches`,
       "`origin` and pushes THROUGH THE APP, so it works here.",

@@ -16,7 +16,6 @@ import {
 describe("githubSystemAppend (the anti-'gh auth login' steering)", () => {
   it("connected + bridged: git is authenticated, publish via github_create_repo", () => {
     const s = githubSystemAppend({ connected: true, login: "octocat" }, true);
-    expect(s).toContain('as "octocat"');
     expect(s).toContain("ALREADY AUTHENTICATED");
     expect(s).toContain("github_create_repo");
     // The core promise: novices are never sent to the terminal or github.com/new.
@@ -42,6 +41,19 @@ describe("githubSystemAppend (the anti-'gh auth login' steering)", () => {
 
   it("missing status reads as not connected", () => {
     expect(githubSystemAppend(undefined)).toContain("NOT connected");
+  });
+
+  // The prompt cache keys on the system prompt: a line that can differ between
+  // two turns of one conversation throws away the whole cached prefix. The
+  // account name is fetched from github.com and may not be known on the first
+  // turn, so it must not appear here.
+  it("says the same thing whether or not the account name is known", () => {
+    expect(githubSystemAppend({ connected: true, login: "octocat" }, true)).toBe(
+      githubSystemAppend({ connected: true }, true),
+    );
+    expect(githubSystemAppend({ connected: true, login: "octocat" }, false)).toBe(
+      githubSystemAppend({ connected: true }, false),
+    );
   });
 });
 

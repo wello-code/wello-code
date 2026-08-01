@@ -37,6 +37,16 @@ const STAT_CONCURRENCY = 32;
 const READ_CONCURRENCY = 12;
 /** How many bytes of file contents may be in memory before they are stored. */
 const STORE_BATCH_BYTES = 16 * 1024 * 1024;
+/**
+ * The longest a turn may wait for its rewind checkpoint.
+ *
+ * Everything here is bounded by caps and re-used between turns, and on real
+ * projects a repeat costs tens of milliseconds — but the machine underneath is
+ * not ours: a network drive, a virus scanner mid-scan, a laptop disk under load.
+ * With a ceiling the worst case is a rewind that covers less, not a window that
+ * stops answering, and that is a promise the numbers cannot take away.
+ */
+const CHECKPOINT_BUDGET_MS = 6_000;
 
 /** Directories never snapshotted (noise / huge / build output) — mirrors the picker. */
 const IGNORE_DIRS = new Set([
@@ -240,7 +250,9 @@ async function scanTree(
   taskId: string,
   cwd: string,
   previous: Record<string, SnapshotFileMeta> | null,
+  deadline?: number,
 ): Promise<Scan> {
+  const outOfTime = (): boolean => deadline !== undefined && Date.now() > deadline;
   const files: Record<string, SnapshotFileMeta> = {};
   let partial = false;
   const rels = await walk(cwd);
@@ -257,6 +269,7 @@ async function scanTree(
   //    The write paths (revert, restore) still resolve, and must: they take
   //    paths from a manifest and put bytes on disk.
   const stats = await mapLimit(rels, STAT_CONCURRENCY, async (rel) => {
+    if (outOfTime()) return null;
     let real: string;
     try {
       real = assertInside(cwd, rel);
@@ -267,6 +280,7 @@ async function scanTree(
     if (!info || !info.isFile()) return null;
     return { rel, real, size: info.size, mtimeMs: info.mtimeMs };
   });
+  if (outOfTime()) partial = true;
 
   // 2. Apply the caps in walk order, so which files a partial snapshot keeps
   //    stays deterministic, and split "already known" from "must be read".
@@ -305,6 +319,14 @@ async function scanTree(
   //    held in memory until the batch is appended, and a 128 MB tree must not
   //    become 128 MB of heap.
   for (const chunk of chunkByBytes(toRead, STORE_BATCH_BYTES)) {
+    // Out of time: what was captured stays captured, the rest makes this a
+    // partial snapshot (which restore already handles — it never deletes files
+    // it did not record). A turn that starts late is worse than a rewind that
+    // covers less.
+    if (outOfTime()) {
+      partial = true;
+      break;
+    }
     const read = await mapLimit(chunk, READ_CONCURRENCY, async (entry) => {
       const buf = await readFile(entry.real).catch(() => null);
       if (!buf) return null;
@@ -374,6 +396,7 @@ export async function prepareTurn(
   turnId: string,
   cwd: string,
   dirtyPaths: string[] | null,
+  budgetMs = CHECKPOINT_BUDGET_MS,
 ): Promise<void> {
   sanitizeTaskId(taskId);
   sanitizeCheckpointId(turnId);
@@ -383,7 +406,12 @@ export async function prepareTurn(
   } else {
     await ensureGitBaseline(taskId, cwd, dirtyPaths).catch(() => undefined);
   }
-  if (!scan) scan = await scanTree(taskId, cwd, await loadLastScan(cwd));
+  // The per-turn checkpoint gets a ceiling; the baselines above do not. A
+  // baseline runs once per task and decides what the review pane calls "changed"
+  // — cutting it short would blame the user's own files on the agent. The
+  // checkpoint only backs «откатить ход», so a partial one degrades a feature
+  // instead of making the user wait.
+  if (!scan) scan = await scanTree(taskId, cwd, await loadLastScan(cwd), Date.now() + budgetMs);
   await writeCheckpoint(taskId, turnId, cwd, scan);
 }
 

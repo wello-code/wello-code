@@ -233,12 +233,18 @@ async function writeSave(payload: StateSavePayload): Promise<void> {
   lastWriteBytes = bytes;
 }
 
+/** Resolves when nothing is queued or in flight (tests; a shutdown flush later). */
+let settled: Promise<void> = Promise.resolve();
+export function savesSettled(): Promise<void> {
+  return settled;
+}
+
 export function saveState(payload: StateSavePayload): void {
   // Newest wins: an older queued payload is dropped, never written.
   queued = payload;
   if (flushing) return;
   flushing = true;
-  void (async () => {
+  settled = (async () => {
     try {
       while (queued) {
         const next = queued;

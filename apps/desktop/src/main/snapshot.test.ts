@@ -12,6 +12,7 @@ let userData = "";
 import {
   captureCheckpoint,
   configureSnapshots,
+  prepareTurn,
   ensureBaseline,
   gc,
   hasCheckpoint,
@@ -253,6 +254,31 @@ describe("checkpoints (rewind)", () => {
     const packs = await readdir(join(userData, "review-snapshots", "packs"));
     expect(packs.length).toBeLessThanOrEqual(4); // pack + index, maybe one roll
   }, 60_000);
+
+  // A turn must never wait on the filesystem without a ceiling: a network drive
+  // or a virus scanner mid-scan is not ours to control. Past the budget the
+  // checkpoint keeps what it captured and marks itself partial — which restore
+  // already handles by leaving unrecorded files alone.
+  it("gives up on time instead of making the turn wait", async () => {
+    const ws = await newWorkspace();
+    await mkdir(join(ws, "src"), { recursive: true });
+    for (let i = 0; i < 200; i++) {
+      await writeFile(join(ws, "src", `f${i}.ts`), `export const n = ${i};\n${"z".repeat(2000)}`);
+    }
+    await writeFile(join(ws, "keep.ts"), "const a = 1;\n");
+
+    // A git repo with nothing dirty: the baseline is free, so what is measured
+    // here is the per-turn checkpoint — the part that has the ceiling.
+    const t0 = Date.now();
+    await prepareTurn("task-budget", "run-1", ws, [], 0); // no time at all
+    expect(Date.now() - t0).toBeLessThan(5_000);
+    expect(await hasCheckpoint("task-budget", "run-1")).toBe(true);
+
+    // Files the checkpoint never recorded are left exactly as they are.
+    await writeFile(join(ws, "keep.ts"), "const a = 2;\n");
+    expect(await restoreCheckpoint("task-budget", "run-1", ws)).toBe(true);
+    expect(await readFile(join(ws, "keep.ts"), "utf8")).toBe("const a = 2;\n");
+  }, 30_000);
 
   it("gc adopts a pre-shared-store task's blobs instead of stranding them", async () => {
     const ws = await newWorkspace();
