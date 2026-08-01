@@ -187,6 +187,21 @@ export async function authStatus(): Promise<GitHubAuthStatus> {
   }
 }
 
+/**
+ * The same answer without ever touching the network.
+ *
+ * Every turn asks whether GitHub is connected, because it decides how the system
+ * prompt talks about pushing. Asking github.com for the login as part of that
+ * put a request — up to its 30 s timeout — between the user pressing Send and
+ * the model starting, on a connection that may not reach github.com at all.
+ * Connectedness is a local fact (we hold a token); the login is a nicety, and
+ * whatever the UI already fetched is reused.
+ */
+export async function authStatusLocal(): Promise<GitHubAuthStatus> {
+  if (!(await getToken())) return { connected: false };
+  return cachedLogin ? { connected: true, login: cachedLogin } : { connected: true };
+}
+
 export async function disconnect(): Promise<void> {
   await clearToken();
 }

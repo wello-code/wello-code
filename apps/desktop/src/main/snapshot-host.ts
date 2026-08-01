@@ -30,11 +30,24 @@ interface Pending {
 /** A single call may not outlive this. Nothing here should take a minute; if it
  *  does, failing is better than a turn that never starts. */
 const CALL_TIMEOUT_MS = 5 * 60_000;
+/** Past this, the user felt it — leave a line so the next report has the number
+ *  instead of "приложение висело". */
+const SLOW_CALL_MS = 3_000;
 
 let worker: Worker | null = null;
 let disabled = false;
 let nextId = 1;
 const pending = new Map<number, Pending>();
+
+/**
+ * The worker owns the store, but this process points its own copy of the module
+ * at the same folder too: the fallback path needs it, and so does the perf
+ * report, which measures how much disk the snapshots take. Called once at
+ * startup (and again by the fallback, which is idempotent).
+ */
+export function configureSnapshotPaths(): void {
+  inProcess.configureSnapshots(app.getPath("userData"));
+}
 
 /**
  * The worker died with calls outstanding. Those calls are a turn waiting to
@@ -43,9 +56,9 @@ const pending = new Map<number, Pending>();
 function rescuePending(): void {
   const stranded = [...pending.values()];
   pending.clear();
+  if (stranded.length > 0) configureSnapshotPaths();
   for (const p of stranded) {
     clearTimeout(p.timer);
-    inProcess.configureSnapshots(app.getPath("userData"));
     p.retry().then(p.resolve, (err: unknown) =>
       p.reject(err instanceof Error ? err : new Error(String(err))),
     );
@@ -95,28 +108,36 @@ function spawn(): Worker | null {
 }
 
 async function call<T>(op: SnapshotOp, args: unknown[], here: () => Promise<T>): Promise<T> {
+  const started = Date.now();
+  const timed = <R>(result: Promise<R>): Promise<R> =>
+    result.finally(() => {
+      const ms = Date.now() - started;
+      if (ms >= SLOW_CALL_MS) log.warn(`snapshot ${op} took ${ms} ms`);
+    });
   if (!worker) worker = spawn();
   const w = worker;
   if (!w) {
     // No worker: run in this process, and make sure the store knows where it is.
-    inProcess.configureSnapshots(app.getPath("userData"));
-    return here();
+    configureSnapshotPaths();
+    return timed(here());
   }
   const id = nextId++;
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      pending.delete(id);
-      reject(new Error(`snapshot ${op} timed out`));
-    }, CALL_TIMEOUT_MS);
-    timer.unref?.();
-    pending.set(id, {
-      resolve: resolve as (v: unknown) => void,
-      reject,
-      timer,
-      retry: here as () => Promise<unknown>,
-    });
-    w.postMessage({ id, op, args });
-  });
+  return timed(
+    new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`snapshot ${op} timed out`));
+      }, CALL_TIMEOUT_MS);
+      timer.unref?.();
+      pending.set(id, {
+        resolve: resolve as (v: unknown) => void,
+        reject,
+        timer,
+        retry: here as () => Promise<unknown>,
+      });
+      w.postMessage({ id, op, args });
+    }),
+  );
 }
 
 /** Baseline + per-turn checkpoint in one call and one tree scan (see snapshot.ts). */

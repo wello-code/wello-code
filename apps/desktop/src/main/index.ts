@@ -1122,6 +1122,9 @@ app.whenReady().then(() => {
   // Watch what the app costs the machine. Writes nothing while everything is
   // normal; a spike leaves one line in the log, which is what a report needs.
   startPerfWatch();
+  // Where the snapshot store lives, for this process too (the worker is told
+  // separately). The perf report reads its size from here.
+  snapshot.configureSnapshotPaths();
 
   initUpdater((status) => mainWindow?.webContents.send("update.changed", status));
   // Check a little after launch rather than during it: startup is already busy,

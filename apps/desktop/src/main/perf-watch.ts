@@ -1,5 +1,6 @@
 import { app } from "electron";
 import { log } from "./logger";
+import { storeBytes } from "./object-store";
 import { hardwareAccelerationEnabledSync } from "./settings-store";
 import { saveStats } from "./state-store";
 
@@ -131,10 +132,11 @@ export function stopPerfWatch(): void {
 /**
  * A snapshot the user can copy out of Settings and paste into a support ticket:
  * versions, the GPU feature matrix (an app compositing in software burns CPU for
- * every blinking caret) and the per-process split.
+ * every blinking caret), the per-process split and what the snapshot store holds.
  */
-export function perfReportText(): string {
+export async function perfReportText(): Promise<string> {
   const report = sample();
+  const storeMb = Math.round((await storeBytes().catch(() => 0)) / (1024 * 1024));
   const gpu = Object.entries(report.gpu)
     .map(([k, v]) => `  ${k}: ${v}`)
     .join("\n");
@@ -153,6 +155,7 @@ export function perfReportText(): string {
     `  буферы: ${report.main.externalMb} МБ (из них массивы ${report.main.arrayBuffersMb} МБ)`,
     `  всего у процесса: ${report.main.rssMb} МБ`,
     `  сохранений истории: ${report.state.saves}, последняя запись ${Math.round(report.state.bytes / 1024)} КБ`,
+    `  снимки проектов на диске: ${storeMb} МБ`,
     "",
     "Графика:",
     gpu || "  нет данных",

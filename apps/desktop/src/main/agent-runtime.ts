@@ -114,7 +114,9 @@ export class AgentRuntime {
       // bridge goes to TRUSTED folders only — an untrusted repo is exactly the
       // prompt-injection carrier that must not see the token; publishing still
       // works there via github_create_repo (main pushes with its own auth).
-      const ghStatus = await github.authStatus().catch(() => ({ connected: false }) as const);
+      // Local only: this must never put a request to github.com between Send and
+      // the model's first token (see authStatusLocal).
+      const ghStatus = await github.authStatusLocal().catch(() => ({ connected: false }) as const);
       const gitEnv = trusted ? ((await github.gitAuthEnv().catch(() => null)) ?? undefined) : undefined;
       // The pastes folder holds clipboard screenshots the model opens via Read —
       // whitelist it so viewing an attachment never needs a permission card.
