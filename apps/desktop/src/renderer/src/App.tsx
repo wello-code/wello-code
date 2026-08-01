@@ -63,7 +63,8 @@ import { AttachThumb, ChatImages, Lightbox } from "./Images";
 import { Icon, type IconName } from "./Icon";
 import { loadDockPrefs, restorablePanels, saveDockPrefs } from "./dock-layout";
 import { DOCK_MIN, PanelDock, type PanelId } from "./Panels";
-import { Markdown } from "./Markdown";
+import { Markdown, MarkdownBody } from "./Markdown";
+import { splitStreaming } from "./stream-split";
 import { SettingsView } from "./Settings";
 import {
   loadLastSettingsPage,
@@ -4841,7 +4842,7 @@ const Item = memo(function Item({
       );
     }
     case "message":
-      return <AssistantMessage text={item.text} onOpenFile={onOpenFile} />;
+      return <AssistantMessage text={item.text} streaming={!item.done} onOpenFile={onOpenFile} />;
     case "plan":
       return (
         <div className="plan">
@@ -4865,12 +4866,19 @@ const Item = memo(function Item({
 });
 
 /** An assistant reply: the markdown plus a copy action revealed on hover/focus.
- *  Memoized: see the note on {@link Item}. */
+ *  Memoized: see the note on {@link Item}.
+ *
+ *  While it streams, the finished part and the part still arriving are rendered
+ *  separately (inside ONE `.md` container, so the prose rhythm is untouched):
+ *  otherwise every chunk re-parses the whole answer, which is why a long reply
+ *  used to get slower the longer it ran. See stream-split.ts for the numbers. */
 const AssistantMessage = memo(function AssistantMessage({
   text,
+  streaming,
   onOpenFile,
 }: {
   text: string;
+  streaming: boolean;
   onOpenFile: (path: string) => void;
 }) {
   const copy = (): void => {
@@ -4880,9 +4888,17 @@ const AssistantMessage = memo(function AssistantMessage({
       () => toast({ message: "Не удалось скопировать", tone: "danger" }),
     );
   };
+  const split = streaming ? splitStreaming(text) : null;
   return (
     <div className="msg">
-      <Markdown text={text || "…"} onOpenFile={onOpenFile} />
+      {split?.head ? (
+        <div className="md">
+          <MarkdownBody text={split.head} onOpenFile={onOpenFile} />
+          <MarkdownBody text={split.tail} onOpenFile={onOpenFile} live />
+        </div>
+      ) : (
+        <Markdown text={text || "…"} onOpenFile={onOpenFile} />
+      )}
       {text ? (
         <div className="msg__actions">
           <button

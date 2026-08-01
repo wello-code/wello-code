@@ -43,6 +43,7 @@ import {
   type BrowserSignIn,
 } from "./auth-device";
 import { AgentRuntime } from "./agent-runtime";
+import { batchAgentEvents } from "./event-stream";
 import * as gitService from "./git";
 import { isChatId, loadState, saveDrafts, saveState } from "./state-store";
 import { hardwareAccelerationEnabledSync, loadSettings, saveSettings } from "./settings-store";
@@ -174,9 +175,13 @@ function notifyForEvent(event: AgentEvent): void {
   }
 }
 
-/** All agent events fan out to the renderer over the single push channel. */
-const runtime = new AgentRuntime(getApiKey, (event) => {
+/** All agent events fan out to the renderer over the single push channel, with
+ *  the answer's chunks coalesced on the way (see event-stream.ts). */
+const forwardAgentEvent = batchAgentEvents((event) => {
   mainWindow?.webContents.send("agent.events", event);
+});
+const runtime = new AgentRuntime(getApiKey, (event) => {
+  forwardAgentEvent(event);
   notifyForEvent(event);
 });
 

@@ -134,9 +134,25 @@ function remember(key: string, html: string): void {
   }
 }
 
-/** Highlight `code` as `lang`, returning trusted HTML — or null when unknown/failed. */
-export function highlight(code: string, lang: string | null): string | null {
+/**
+ * Highlight `code` as `lang`, returning trusted HTML — or null when unknown/failed.
+ * `cache: false` for a block that is still being streamed: every frame is a new
+ * string, so remembering them only evicts the finished blocks that get asked for
+ * again.
+ */
+export function highlight(
+  code: string,
+  lang: string | null,
+  opts: { cache?: boolean } = {},
+): string | null {
   if (!lang) return null;
+  if (opts.cache === false) {
+    try {
+      return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
+    } catch {
+      return null;
+    }
+  }
   // NUL separates the parts because it can occur in neither. Written as an
   // ESCAPE rather than as the byte itself: a literal control character in the
   // source makes git treat the whole file as binary — no diffs, nothing to review.

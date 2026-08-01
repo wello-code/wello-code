@@ -73,7 +73,7 @@ function CodeBlock({ children, lang }: { children: ReactNode; lang: string }) {
   );
 }
 
-function buildComponents(onOpenFile?: (path: string) => void): Components {
+function buildComponents(onOpenFile?: (path: string) => void, live = false): Components {
   return {
     a({ href, children }) {
       // A relative href that names a workspace file opens in the inspector; a real
@@ -119,7 +119,9 @@ function buildComponents(onOpenFile?: (path: string) => void): Components {
       // Token colors come from design-system variables (app.css maps .hljs-*).
       // hljs escapes the source itself, so its output HTML is safe to inject.
       const lang = resolveLanguage(/language-([\w+-]+)/.exec(className ?? "")?.[1]);
-      const html = highlight(String(children).replace(/\n$/, ""), lang);
+      // A block that is still being typed is a different string every frame, so
+      // caching it would evict the finished ones for entries never asked for twice.
+      const html = highlight(String(children).replace(/\n$/, ""), lang, { cache: !live });
       return html != null ? (
         <code className={className} dangerouslySetInnerHTML={{ __html: html }} />
       ) : (
@@ -147,12 +149,35 @@ export const Markdown = memo(function Markdown({
   text: string;
   onOpenFile?: (path: string) => void;
 }) {
-  const components = useMemo(() => buildComponents(onOpenFile), [onOpenFile]);
   return (
     <div className="md">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {text}
-      </ReactMarkdown>
+      <MarkdownBody text={text} onOpenFile={onOpenFile} />
     </div>
+  );
+});
+
+/**
+ * The same, without the `.md` wrapper — so a streaming answer can be rendered as
+ * "the part that is finished" plus "the part still arriving" INSIDE one `.md`
+ * container. Two containers would break the prose rhythm: the spacing rules are
+ * written as `.md > *`, and each wrapper would zero the margins at its own edges.
+ *
+ * `live` marks the still-growing half: its code blocks are highlighted but not
+ * remembered (see the note in the code component).
+ */
+export const MarkdownBody = memo(function MarkdownBody({
+  text,
+  onOpenFile,
+  live = false,
+}: {
+  text: string;
+  onOpenFile?: (path: string) => void;
+  live?: boolean;
+}) {
+  const components = useMemo(() => buildComponents(onOpenFile, live), [onOpenFile, live]);
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      {text}
+    </ReactMarkdown>
   );
 });
