@@ -566,12 +566,16 @@ function Workspace({
   // Carries the account identity too (e-mail + web display name) for the
   // sidebar-footer account row.
   const [subInfo, setSubInfo] = useState<
-    Pick<Connection, "billing" | "planId" | "planActive" | "usedFraction" | "email" | "displayName">
+    Pick<
+      Connection,
+      "billing" | "planId" | "planActive" | "usedFraction" | "bonus" | "email" | "displayName"
+    >
   >({
     billing: connection?.billing,
     planId: connection?.planId ?? null,
     planActive: connection?.planActive,
     usedFraction: connection?.usedFraction ?? null,
+    bonus: connection?.bonus ?? null,
     email: connection?.email ?? null,
     displayName: connection?.displayName ?? null,
   });
@@ -1262,6 +1266,7 @@ function Workspace({
             planId: c.planId ?? null,
             planActive: c.planActive,
             usedFraction: c.usedFraction ?? null,
+            bonus: c.bonus ?? null,
             email: c.email ?? null,
             displayName: c.displayName ?? null,
           });
@@ -1288,6 +1293,7 @@ function Workspace({
           planId: c.planId ?? null,
           planActive: c.planActive,
           usedFraction: c.usedFraction ?? null,
+          bonus: c.bonus ?? null,
           email: c.email ?? null,
           displayName: c.displayName ?? null,
         });
@@ -2793,18 +2799,26 @@ ${t.workspaceName}` : t.title
             // gateways); the open menu header shows the e-mail with the plan
             // chip to its right.
             const leftPct = Math.max(0, Math.round((1 - (subInfo.usedFraction ?? 0)) * 100));
+            // Бонус тратится раньше тарифа и живёт своим сроком, поэтому исчерпанный
+            // тариф при живом подарке — не повод показывать пугающий ноль красным.
+            const bonusLeftPct = subInfo.bonus
+              ? Math.max(0, Math.round((1 - subInfo.bonus.usedFraction) * 100))
+              : null;
+            const onBonus = leftPct <= 0 && bonusLeftPct != null && bonusLeftPct > 0;
             const planLabel = planLabelOf(subInfo.billing, subInfo.planId);
             const identity =
               subInfo.displayName ?? (subInfo.email ? subInfo.email.split("@")[0] : null);
             const usage =
               subInfo.billing === "subscription"
-                ? `${leftPct}%`
+                ? onBonus
+                  ? `бонус ${bonusLeftPct}%`
+                  : `${leftPct}%`
                 : balanceCents != null
                   ? `$${(balanceCents / 100).toFixed(2)}`
                   : "";
             const low =
               subInfo.billing === "subscription"
-                ? leftPct <= 10
+                ? leftPct <= 10 && !onBonus
                 : subInfo.billing === "blocked" ||
                   (balanceCents != null && balanceCents < LOW_BALANCE_CENTS);
             return (
@@ -5205,7 +5219,7 @@ function fmtTokensK(n: number): string {
  * The conversation-context gauge: a small donut that fills as the model's window
  * does (as in web Wello). Hover shows the numbers; click opens a details pop-up.
  */
-type SubUsage = Pick<Connection, "billing" | "planId" | "usedFraction">;
+type SubUsage = Pick<Connection, "billing" | "planId" | "usedFraction" | "bonus">;
 
 function ContextRing({
   used,
@@ -5297,30 +5311,70 @@ function ContextRing({
   );
 }
 
+/** Короткая дата сгорания бонуса: «до 28 августа». */
+function bonusUntil(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return `до ${d.toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}`;
+}
+
 /** Monthly plan-cap usage shown under the context gauge, subscription only. */
 function SubscriptionLimits({ sub }: { sub: SubUsage }) {
   // Since 2026-07 a plan has a single monthly cap that resets on renewal (the old
   // 5-hour/weekly windows are gone) — one bar, same as the web app's limit popup.
-  if (sub.billing !== "subscription" || sub.usedFraction == null) return null;
-  const pct = Math.round(Math.min(1, Math.max(0, sub.usedFraction)) * 100);
+  const hasPlan = sub.billing === "subscription" && sub.usedFraction != null;
+  // Бонусный лимит (компенсации) — отдельный от тарифа кошелёк: тратится ПЕРВЫМ и
+  // продолжает работать после окончания подписки. Поэтому у него своя полоса, и она
+  // показывается даже без активного тарифа: иначе человек не понимает, за счёт чего
+  // ещё идут ходы.
+  const bonus = sub.bonus ?? null;
+  if (!hasPlan && !bonus) return null;
+  const pct = Math.round(Math.min(1, Math.max(0, sub.usedFraction ?? 0)) * 100);
   const tone = pct >= 90 ? "var(--danger)" : pct >= 75 ? "var(--warning)" : "var(--accent)";
   const plan = PLAN_LABELS[sub.planId ?? ""] ?? "Подписка";
+  const bonusPct = bonus ? Math.round(bonus.usedFraction * 100) : 0;
+  const until = bonus ? bonusUntil(bonus.expiresAt) : null;
   return (
     <div className="ctx__limits">
       <div className="ctx__limits-head">
-        <span className="ctx__label">Лимит подписки</span>
-        <span className="ctx__plan">{plan}</span>
+        <span className="ctx__label">{hasPlan ? "Лимит подписки" : "Бонусный лимит"}</span>
+        <span className="ctx__plan">{hasPlan ? plan : (until ?? "подарок")}</span>
       </div>
-      <div
-        className="ctx__win ctx__win--single"
-        title={`Использовано ${pct}% лимита на месяц. Лимит сбрасывается при продлении подписки.`}
-      >
-        <span className="ctx__bar ctx__win-bar" aria-hidden>
-          <span className="ctx__fill" style={{ width: `${pct}%`, background: tone }} />
-        </span>
-        <span className="ctx__win-pct">{pct}%</span>
-      </div>
-      <p className="ctx__limits-note">На месяц, сброс при продлении подписки</p>
+      {hasPlan ? (
+        <div
+          className="ctx__win ctx__win--single"
+          title={`Использовано ${pct}% лимита на месяц. Лимит сбрасывается при продлении подписки.`}
+        >
+          <span className="ctx__bar ctx__win-bar" aria-hidden>
+            <span className="ctx__fill" style={{ width: `${pct}%`, background: tone }} />
+          </span>
+          <span className="ctx__win-pct">{pct}%</span>
+        </div>
+      ) : null}
+      {bonus ? (
+        <div
+          className="ctx__win ctx__win--single"
+          title={`Бонус израсходован на ${bonusPct}%. Тратится раньше лимита тарифа${
+            until ? `, действует ${until}` : ""
+          }.`}
+        >
+          <span className="ctx__bar ctx__win-bar" aria-hidden>
+            <span
+              className="ctx__fill"
+              style={{ width: `${bonusPct}%`, background: "var(--accent)" }}
+            />
+          </span>
+          <span className="ctx__win-pct">{bonusPct}%</span>
+        </div>
+      ) : null}
+      <p className="ctx__limits-note">
+        {hasPlan
+          ? bonus
+            ? `Бонус тратится первым${until ? `, ${until}` : ""}, затем лимит тарифа`
+            : "На месяц, сброс при продлении подписки"
+          : `Бонусный лимит${until ? `, ${until}` : ""}`}
+      </p>
     </div>
   );
 }

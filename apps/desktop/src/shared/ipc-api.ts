@@ -52,6 +52,8 @@ export interface Connection {
   overflowEnabled?: boolean | null;
   /** Used fraction (0..1) of the monthly subscription cap (resets on renewal). */
   usedFraction?: number | null;
+  /** Бонусный лимит (компенсации): тратится раньше тарифа и живёт своим сроком. */
+  bonus?: { usedFraction: number; expiresAt: string | null } | null;
   error?: string;
 }
 

@@ -296,6 +296,7 @@ function registerIpc(): void {
     planActive: a.planActive,
     overflowEnabled: a.overflowEnabled,
     usedFraction: a.usedFraction,
+    bonus: a.bonus,
   });
 
   ipcMain.handle("wello.setApiKey", async (_e, key: string): Promise<Connection> => {

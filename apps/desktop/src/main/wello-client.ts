@@ -79,6 +79,12 @@ export interface AccessInfo {
    * the old 5-hour/weekly windows are gone.
    */
   usedFraction: number | null;
+  /**
+   * Бонусный лимит: компенсации и подарки. Отдельный от тарифа кошелёк, который
+   * тратится ПЕРВЫМ и продолжает работать после окончания подписки. null — бонуса
+   * нет (или шлюз старый и поля не отдаёт).
+   */
+  bonus: { usedFraction: number; expiresAt: string | null } | null;
   paygBalanceCents: number;
 }
 
@@ -133,6 +139,7 @@ export async function fetchAccess(apiKey: string): Promise<AccessInfo> {
       planActive: false,
       overflowEnabled: null,
       usedFraction: null,
+      bonus: null,
       paygBalanceCents: balanceCents,
     };
   }
@@ -153,6 +160,7 @@ export async function fetchAccess(apiKey: string): Promise<AccessInfo> {
       used_fraction?: number;
       overflow_enabled?: boolean;
     } | null;
+    bonus?: { used_fraction?: number; expires_at?: string | null } | null;
     payg_balance_cents?: number;
   };
   const billing =
@@ -173,6 +181,13 @@ export async function fetchAccess(apiKey: string): Promise<AccessInfo> {
     planActive: body.plan_active ?? body.subscription != null,
     overflowEnabled: body.payg_overflow_enabled ?? body.subscription?.overflow_enabled ?? null,
     usedFraction: body.subscription?.used_fraction ?? null,
+    bonus:
+      body.bonus && typeof body.bonus.used_fraction === "number"
+        ? {
+            usedFraction: Math.min(1, Math.max(0, body.bonus.used_fraction)),
+            expiresAt: body.bonus.expires_at ?? null,
+          }
+        : null,
     paygBalanceCents: Math.round(body.payg_balance_cents ?? 0),
   };
 }
