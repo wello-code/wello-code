@@ -98,6 +98,8 @@ const api: WelloApi = {
     ipcRenderer.invoke("chat.handoff", transcript, model) as Promise<HandoffOutcome>,
 
   startRun: (input: StartRunInput) => ipcRenderer.invoke("agent.start", input) as Promise<void>,
+  prewarmRun: (input: Omit<StartRunInput, "prompt" | "runId">) =>
+    ipcRenderer.invoke("agent.prewarm", input) as Promise<void>,
   cancelRun: (runId) => ipcRenderer.invoke("agent.cancel", runId) as Promise<void>,
   checkpointExists: (taskId, turnId) =>
     ipcRenderer.invoke("checkpoint.has", taskId, turnId) as Promise<boolean>,

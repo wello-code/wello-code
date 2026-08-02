@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { app } from "electron";
-import { SdkAgentSession, type AgentRunCallbacks, type SdkRunRequest } from "@wello-code/agent-sdk";
+import {
+  SdkAgentSession,
+  type AgentRunCallbacks,
+  type PreparedEngine,
+  type SdkRunRequest,
+} from "@wello-code/agent-sdk";
 import {
   parseAgentEvent,
   type AgentEvent,
@@ -9,6 +14,7 @@ import {
   type QuestionAnswer,
   type QuestionRequest,
 } from "@wello-code/contracts";
+import { log } from "./logger";
 import { pastesDir } from "./paste-store";
 import { resolveRunSkills } from "./bundled-skills";
 import * as github from "./github";
@@ -41,31 +47,48 @@ interface PendingGithubConnect {
  * out-of-band request the renderer answers through `respondPermission`. One key is
  * fetched per run so a rotated credential takes effect immediately.
  */
+/**
+ * How long a warmed engine waits for the message it was warmed for. It costs a
+ * few hundred megabytes, so a user who started typing and walked away must not
+ * keep paying for it — but a normal "type, re-read, send" pause fits easily.
+ */
+const PREWARM_IDLE_MS = 3 * 60_000;
+
 export class AgentRuntime {
   private readonly aborts = new Map<string, AbortController>();
   private readonly pending = new Map<string, PendingPermission>();
   private readonly pendingQuestions = new Map<string, PendingQuestion>();
   private readonly pendingConnects = new Map<string, PendingGithubConnect>();
+  /** An engine spawned ahead of time, and the session that owns it. */
+  private prepared: PreparedEngine | null = null;
+  private preparedBy: SdkAgentSession | null = null;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private warming = false;
 
   constructor(
     private readonly getApiKey: () => Promise<string | null>,
     private readonly emit: AgentEventSink,
   ) {}
 
-  async start(req: SdkRunRequest): Promise<void> {
-    // Register cancellation BEFORE any await: fetching the key (OS keychain
-    // decrypt) and loading settings can take a moment, and a Stop pressed in that
-    // window must abort — otherwise the run would proceed to edit files and spend
-    // balance while the UI already shows it stopped.
-    const abort = new AbortController();
-    this.aborts.set(req.runId, abort);
-    try {
+  /**
+   * Everything a run needs beyond what the window sends: the key, the user's
+   * settings, skills, connectors, workspace trust and the GitHub bridge.
+   *
+   * Split out of `start` so the pre-warm path can assemble the very same request
+   * ahead of time — the engine is spawned from these values, so they are also
+   * what decides whether a warmed engine fits the turn that arrives.
+   */
+  private async assemble(
+    req: SdkRunRequest,
+    aborted?: () => boolean,
+  ): Promise<{ req: SdkRunRequest; apiKey: string } | null> {
+    {
       const apiKey = await this.getApiKey();
       if (!apiKey) {
         this.emit(this.fail(req, "not_connected", "Сначала подключите аккаунт Wello."));
-        return;
+        return null;
       }
-      if (abort.signal.aborted) return;
+      if (aborted?.()) return null;
       // Attach the user's configured MCP connectors and plugin dirs to this run.
       const settings = await loadSettings();
       const mcpServers: NonNullable<SdkRunRequest["mcpServers"]> = {};
@@ -142,9 +165,14 @@ export class AgentRuntime {
         },
         ...(gitEnv ? { gitEnv } : {}),
       };
-      if (abort.signal.aborted) return;
+      if (aborted?.()) return null;
+      return { req, apiKey };
+    }
+  }
 
-      const session = new SdkAgentSession({ apiKey, appVersion: app.getVersion() });
+  /** The callbacks a turn answers with: permission cards, questions, GitHub. */
+  private callbacksFor(req: SdkRunRequest): AgentRunCallbacks {
+    {
       const callbacks: AgentRunCallbacks = {
         onEvent: (event) => this.emit(event),
         requestPermission: (request: PermissionRequest) =>
@@ -192,7 +220,117 @@ export class AgentRuntime {
         createGithubRepo: (input) =>
           publishToGitHub(req.workspacePath, { ...input, push: true }),
       };
-      await session.run(req, callbacks, abort.signal);
+      return callbacks;
+    }
+  }
+
+  /**
+   * Spawn the engine while the user is still typing, so pressing Send does not
+   * wait for a process to start.
+   *
+   * Measured on the built app against the live gateway (2026-08-02): 2.3–3.7 s
+   * of every turn passed before the first byte went upstream, on every turn —
+   * that is the engine starting. Warming is the same work, moved to the moment
+   * the user is composing, and dropped again if they walk away.
+   *
+   * Best-effort throughout: any failure here just means the turn starts the
+   * engine itself, exactly as before.
+   */
+  async prewarm(input: SdkRunRequest): Promise<void> {
+    // Deliberately allowed WHILE a run is in flight: typing during an answer is
+    // the type-ahead case, and refusing there costs the next turn its head start
+    // (measured — the run settles seconds after its last word reaches the
+    // window, and by then the user has already pressed Send). At most one spare
+    // exists at a time and it is closed on idle, so the cost is bounded.
+    if (this.warming) return;
+    const key = await this.getApiKey().catch(() => null);
+    if (!key) return;
+    const session = new SdkAgentSession({ apiKey: key, appVersion: app.getVersion() });
+    this.warming = true;
+    try {
+      const assembled = await this.assemble(input);
+      if (!assembled) return;
+      const fingerprint = session.fingerprintFor(assembled.req);
+      if (this.prepared?.fingerprint === fingerprint) return; // already have it
+      this.dropPrepared();
+      const prepared = await session.prepare(assembled.req, this.callbacksFor(assembled.req));
+      this.prepared = prepared;
+      this.preparedBy = session;
+      this.armIdleTimer();
+    } catch (err) {
+      log.warn(`prewarm failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      this.warming = false;
+    }
+  }
+
+  /** Close a warmed engine that nobody claimed — it holds real memory. */
+  private dropPrepared(): void {
+    const prepared = this.prepared;
+    this.prepared = null;
+    this.preparedBy = null;
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+    try {
+      prepared?.warm?.close();
+    } catch {
+      /* already gone */
+    }
+  }
+
+  private armIdleTimer(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => this.dropPrepared(), PREWARM_IDLE_MS);
+    this.idleTimer.unref?.();
+  }
+
+  async start(req: SdkRunRequest): Promise<void> {
+    // Register cancellation BEFORE any await: fetching the key (OS keychain
+    // decrypt) and loading settings can take a moment, and a Stop pressed in that
+    // window must abort — otherwise the run would proceed to edit files and spend
+    // balance while the UI already shows it stopped.
+    const abort = new AbortController();
+    this.aborts.set(req.runId, abort);
+    try {
+      const apiKey = await this.getApiKey();
+      if (!apiKey) {
+        this.emit(this.fail(req, "not_connected", "Сначала подключите аккаунт Wello."));
+        return;
+      }
+      const assembled = await this.assemble(req, () => abort.signal.aborted);
+      if (!assembled) return;
+      const session =
+        this.preparedBy ??
+        new SdkAgentSession({ apiKey, appVersion: app.getVersion() });
+      // A warmed engine is only usable when it was built for exactly this shape
+      // of turn (model, folder, mode, skills, connectors, key). Anything else
+      // starts its own, as before.
+      const prepared =
+        this.prepared && this.prepared.fingerprint === session.fingerprintFor(assembled.req)
+          ? this.prepared
+          : undefined;
+      if (prepared) {
+        this.prepared = null; // claimed: a warm handle serves exactly one turn
+        this.preparedBy = null;
+        if (this.idleTimer) {
+          clearTimeout(this.idleTimer);
+          this.idleTimer = null;
+        }
+      } else {
+        this.dropPrepared(); // stale spare, and this turn will not use it
+      }
+      // One line per turn: "was the engine ready?" is the first question when
+      // someone reports that sending felt slow.
+      log.info(prepared ? "turn on a warmed engine" : "turn starts its own engine");
+      if (abort.signal.aborted) return;
+      await session.run(
+        assembled.req,
+        this.callbacksFor(assembled.req),
+        abort.signal,
+        prepared,
+      );
     } catch (err) {
       this.emit(this.fail(req, "runtime_error", err instanceof Error ? err.message : String(err)));
     } finally {
@@ -217,6 +355,7 @@ export class AgentRuntime {
    */
   cancelAll(): void {
     for (const runId of [...this.aborts.keys()]) this.cancel(runId);
+    this.dropPrepared();
   }
 
   respondPermission(requestId: string, decision: PermissionDecision): void {

@@ -583,6 +583,12 @@ export interface WelloApi {
 
   // Agent run lifecycle.
   startRun(input: StartRunInput): Promise<void>;
+  /**
+   * Spawn the engine ahead of the message, while the user is still typing —
+   * pressing Send then costs seconds less (see AgentRuntime.prewarm). Same
+   * input as a run minus the prompt; best-effort and safe to call often.
+   */
+  prewarmRun(input: Omit<StartRunInput, "prompt" | "runId">): Promise<void>;
   cancelRun(runId: string): Promise<void>;
   /** Whether a pre-turn checkpoint exists (gates «Откатить сюда»). */
   checkpointExists(taskId: string, turnId: string): Promise<boolean>;

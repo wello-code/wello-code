@@ -900,6 +900,48 @@ function Workspace({
     return () => clearTimeout(id);
   }, [prompt, editing]);
 
+  /**
+   * Typing is also the signal to get the engine ready.
+   *
+   * Measured against the live gateway: 2.3–3.7 seconds of every turn passed
+   * between pressing Send and the first byte going out — the engine process
+   * starting. Warming it while the message is being written moves that wait into
+   * time the user was spending anyway. Main drops the warm engine if the message
+   * never comes (it costs memory), so the cost of a false alarm is zero.
+   *
+   * Once per composed message: the deps deliberately exclude `prompt` itself, so
+   * a long message does not re-trigger on every keystroke.
+   */
+  const warmedFor = useRef<string | null>(null);
+  const typing = prompt.trim().length > 0;
+  // A warmed engine serves exactly one turn, so starting a run spends it and the
+  // next message must ask for its own. (Typing DURING a run is the type-ahead
+  // case — that message gets a spare of its own too.)
+  useEffect(() => {
+    warmedFor.current = null;
+  }, [activeRunning]);
+  useEffect(() => {
+    if (!typing || !workspace) return;
+    const path = activeTask?.workspacePath ?? workspace.path;
+    const key = `${activeTask?.id ?? "new"}|${path}|${model}|${mode}|${effort}`;
+    if (warmedFor.current === key) return;
+    const id = setTimeout(() => {
+      warmedFor.current = key;
+      void window.wello
+        .prewarmRun({
+          taskId: activeTask?.id ?? "new",
+          workspaceId: activeTask?.id ?? "new",
+          workspacePath: path,
+          mode,
+          model,
+          effort,
+          ...(activeTask?.sessionId ? { resumeSessionId: activeTask.sessionId } : {}),
+        })
+        .catch(() => undefined);
+    }, 150);
+    return () => clearTimeout(id);
+  }, [typing, activeRunning, workspace, activeTask?.id, activeTask?.workspacePath, activeTask?.sessionId, model, mode, effort]);
+
   // Follow the stream only while the user is at (or near) the bottom — never
   // yank the view down while they are reading earlier turns. The 120px pin
   // drives the streaming auto-follow (unchanged); the jump-down button uses its

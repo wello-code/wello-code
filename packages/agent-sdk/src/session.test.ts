@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseAgentEvent } from "@wello-code/contracts";
 import {
   contextTokensFromUsage,
+  engineFingerprint,
   engineModelId,
   githubSystemAppend,
   normalizeDirPrefix,
@@ -368,5 +369,55 @@ describe("taskIdFromCreateResult (TaskCreate → plan item id)", () => {
   it("returns null when no id is present", () => {
     expect(taskIdFromCreateResult("created ok")).toBeNull();
     expect(taskIdFromCreateResult("")).toBeNull();
+  });
+});
+
+describe("engineFingerprint (what a warmed engine may be reused for)", () => {
+  const conn = { apiKey: "wlo_live_key", appVersion: "0.1.11" };
+  const base = {
+    taskId: "t1",
+    runId: "r1",
+    workspaceId: "t1",
+    workspacePath: "C:/proj",
+    mode: "manual" as const,
+    prompt: "первый вопрос",
+    model: "claude-sonnet-5",
+    effort: "high" as const,
+  };
+
+  it("ignores what a turn brings with it — that is the whole point", () => {
+    // The engine is spawned before the message exists; a warmed one must serve
+    // whatever the user ends up typing.
+    const other = { ...base, prompt: "совсем другой вопрос", runId: "r2", taskId: "t2" };
+    expect(engineFingerprint(other, conn)).toBe(engineFingerprint(base, conn));
+  });
+
+  it("changes with anything the engine bakes in at spawn", () => {
+    const fp = engineFingerprint(base, conn);
+    expect(engineFingerprint({ ...base, model: "claude-opus-5" }, conn)).not.toBe(fp);
+    expect(engineFingerprint({ ...base, mode: "auto" }, conn)).not.toBe(fp);
+    expect(engineFingerprint({ ...base, effort: "low" }, conn)).not.toBe(fp);
+    expect(engineFingerprint({ ...base, workspacePath: "C:/other" }, conn)).not.toBe(fp);
+    expect(engineFingerprint({ ...base, trusted: true }, conn)).not.toBe(fp);
+    expect(engineFingerprint({ ...base, skills: ["design"] }, conn)).not.toBe(fp);
+    expect(engineFingerprint({ ...base, resumeSessionId: "s1" }, conn)).not.toBe(fp);
+    // A fork loads a different history — never reuse an engine across one.
+    expect(engineFingerprint({ ...base, resumeAtMessageUuid: "u1" }, conn)).not.toBe(fp);
+    expect(engineFingerprint(base, { ...conn, apiKey: "wlo_live_other" })).not.toBe(fp);
+    // Credentials are baked into the engine's environment at spawn: a warmed
+    // process still carries the old one, so a rotated one must not reuse it.
+    expect(engineFingerprint({ ...base, gitEnv: { GIT_CONFIG_VALUE_0: "t1" } }, conn)).not.toBe(
+      engineFingerprint({ ...base, gitEnv: { GIT_CONFIG_VALUE_0: "t2" } }, conn),
+    );
+  });
+
+  it("does not care about the ORDER of skills or grants", () => {
+    const a = { ...base, skills: ["one", "two"], workspaceGrants: ["read", "write"] };
+    const b = { ...base, skills: ["two", "one"], workspaceGrants: ["write", "read"] };
+    expect(engineFingerprint(a, conn)).toBe(engineFingerprint(b, conn));
+  });
+
+  it("never carries the key itself", () => {
+    expect(engineFingerprint(base, conn)).not.toContain("wlo_live");
   });
 });

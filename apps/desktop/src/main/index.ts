@@ -609,6 +609,13 @@ function registerIpc(): void {
     // for the whole (multi-second) run.
     void runtime.start(input);
   });
+  // The user is typing: get the engine ready so Send does not wait for it.
+  // Fire-and-forget by contract — a failed warm-up costs nothing but the old
+  // start-up delay.
+  ipcMain.handle("agent.prewarm", (_e, input: StartRunInput): void => {
+    if (!allowWorkspace(input.workspacePath)) return;
+    void runtime.prewarm({ ...input, prompt: "", runId: "prewarm" });
+  });
   ipcMain.handle("checkpoint.has", (_e, taskId: string, turnId: string) =>
     snapshot.hasCheckpoint(taskId, turnId),
   );

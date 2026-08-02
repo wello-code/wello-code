@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
+import { createHash, randomUUID } from "node:crypto";
+import { createSdkMcpServer, query, startup, tool } from "@anthropic-ai/claude-agent-sdk";
 import type {
   CanUseTool,
   EffortLevel,
@@ -7,6 +7,7 @@ import type {
   PermissionMode,
   SDKMessage,
   Settings,
+  WarmQuery,
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import {
@@ -407,6 +408,65 @@ export interface WelloConnection {
   appVersion?: string;
 }
 
+/** The turn a prepared engine is currently serving (see `build`). */
+interface LiveTurn {
+  req: SdkRunRequest;
+  callbacks: AgentRunCallbacks;
+  correlationId: string;
+}
+
+/** An engine ready to take a turn — possibly already spawned (`warm`). */
+export interface PreparedEngine {
+  /** What this engine was built for; a turn may only use a matching one. */
+  fingerprint: string;
+  options: Options;
+  live: LiveTurn;
+  abort: AbortController;
+  emit: (type: string, data: unknown) => void;
+  warm: WarmQuery | null;
+}
+
+/**
+ * Everything baked into the engine at spawn time. Two turns with the same
+ * fingerprint can share a prepared engine; anything else — a different model,
+ * folder, mode, skill set, connector, key — must start its own.
+ *
+ * The prompt, the run id and the callbacks are deliberately NOT in here: those
+ * are the parts a prepared engine takes on when the turn arrives.
+ */
+/** A short digest that stands in for a secret without carrying it. */
+function secretDigest(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 16);
+}
+
+export function engineFingerprint(req: SdkRunRequest, conn: WelloConnection): string {
+  const shape = {
+    workspacePath: req.workspacePath,
+    model: req.model,
+    effort: req.effort,
+    mode: req.mode,
+    trusted: req.trusted,
+    grants: [...(req.workspaceGrants ?? [])].sort(),
+    skills: [...(req.skills ?? [])].sort(),
+    plugins: [...(req.pluginPaths ?? [])].sort(),
+    dirs: [...(req.additionalDirectories ?? [])].sort(),
+    mcp: req.mcpServers ?? null,
+    autoCompactWindow: req.autoCompactWindow ?? null,
+    github: req.github ?? null,
+    instructions: req.projectInstructions ?? null,
+    resume: req.resumeSessionId ?? null,
+    // A fork loads a different history — never reuse an engine across one.
+    resumeAt: req.resumeAtMessageUuid ?? null,
+    baseUrl: conn.baseUrl ?? null,
+    // Credentials are baked into the engine's environment at spawn, so a rotated
+    // one has to mean a different engine — a warmed process still carries the old
+    // one. Hashed, never the values themselves.
+    key: secretDigest(conn.apiKey),
+    gitEnv: req.gitEnv ? secretDigest(JSON.stringify(req.gitEnv)) : null,
+  };
+  return createHash("sha256").update(JSON.stringify(shape)).digest("hex");
+}
+
 export interface SdkRunRequest {
   taskId: string;
   runId: string;
@@ -671,18 +731,29 @@ export class SdkAgentSession {
     };
   }
 
-  async run(req: SdkRunRequest, callbacks: AgentRunCallbacks, signal: AbortSignal): Promise<void> {
-    const correlationId = randomUUID();
+  /**
+   * Everything a turn needs except the message itself: the engine's options, its
+   * abort controller, and the in-process tools. Built separately from the turn so
+   * it can be built EARLY — see `prepare` and `PreparedEngine`.
+   *
+   * `live` is what makes that possible: the tool handlers and the event emitter
+   * read the current turn's request and callbacks through it instead of closing
+   * over one turn's values. Everything else the options bake in (model, folder,
+   * mode, skills, connectors) is part of the fingerprint, so a prepared engine is
+   * only ever used for a turn it actually matches.
+   */
+  private build(req: SdkRunRequest, callbacks: AgentRunCallbacks): PreparedEngine {
+    const live: LiveTurn = { req, callbacks, correlationId: randomUUID() };
     const emit = (type: string, data: unknown): void => {
-      callbacks.onEvent(
+      live.callbacks.onEvent(
         parseAgentEvent({
           id: randomUUID(),
           schemaVersion: 1,
           type,
           timestamp: new Date().toISOString(),
-          correlationId,
-          taskId: req.taskId,
-          runId: req.runId,
+          correlationId: live.correlationId,
+          taskId: live.req.taskId,
+          runId: live.req.runId,
           data,
         }),
       );
@@ -708,7 +779,7 @@ export class SdkAgentSession {
         const isPrivate = input.private !== false;
         const permReq: PermissionRequest = {
           id: randomUUID(),
-          runId: req.runId,
+          runId: live.req.runId,
           intentId: randomUUID(),
           capability: "network",
           risk: "high",
@@ -721,7 +792,7 @@ export class SdkAgentSession {
           allowedDecisions: ["allow_once", "deny"],
         };
         emit("permission.requested", permReq);
-        const decision = await callbacks.requestPermission(permReq);
+        const decision = await live.callbacks.requestPermission(permReq);
         if (decision === "deny") return { behavior: "deny", message: "The user denied this action." };
         return { behavior: "allow", updatedInput: input };
       }
@@ -743,7 +814,7 @@ export class SdkAgentSession {
       }
       const permReq: PermissionRequest = {
         id: randomUUID(),
-        runId: req.runId,
+        runId: live.req.runId,
         intentId: randomUUID(),
         capability,
         risk,
@@ -760,21 +831,20 @@ export class SdkAgentSession {
               : ["allow_once", "allow_for_task", "deny"],
       };
       emit("permission.requested", permReq);
-      const decision = await callbacks.requestPermission(permReq);
+      const decision = await live.callbacks.requestPermission(permReq);
       if (decision === "deny") return { behavior: "deny", message: "The user denied this action." };
       // Remember a task/workspace grant so matching later calls don't re-prompt.
       if (decision === "allow_for_task" || decision === "allow_for_workspace") {
         grantedCaps.add(capability);
       }
       // A workspace grant also persists for the folder's future runs.
-      if (decision === "allow_for_workspace") callbacks.onWorkspaceGrant?.(capability);
+      if (decision === "allow_for_workspace") live.callbacks.onWorkspaceGrant?.(capability);
       return { behavior: "allow", updatedInput: input };
     };
 
+    // The engine's own abort. A turn wires its Stop signal to this one (see
+    // `run`), which is why it is created here and not per turn.
     const abort = new AbortController();
-    const onAbort = (): void => abort.abort();
-    if (signal.aborted) abort.abort();
-    else signal.addEventListener("abort", onAbort, { once: true });
 
     // In-process tool the model calls to ask the user a real question. Its handler
     // surfaces the question to the UI and blocks on the answer, which becomes the
@@ -821,7 +891,7 @@ export class SdkAgentSession {
           async (args) => {
             const request: QuestionRequest = {
               id: randomUUID(),
-              runId: req.runId,
+              runId: live.req.runId,
               questions: (args.questions as Question[]).map((q) => ({
                 header: q.header,
                 question: q.question,
@@ -830,7 +900,7 @@ export class SdkAgentSession {
               })),
             };
             emit("question.requested", request);
-            const answer = await callbacks.requestQuestion(request);
+            const answer = await live.callbacks.requestQuestion(request);
             return { content: [{ type: "text", text: formatAnswer(request, answer) }] };
           },
         ),
@@ -862,13 +932,13 @@ export class SdkAgentSession {
             "needs GitHub and it is not connected — never send the user to gh auth login.",
           {},
           async () => {
-            if (!callbacks.requestGithubConnect) {
+            if (!live.callbacks.requestGithubConnect) {
               return {
                 content: [{ type: "text", text: "GitHub integration is unavailable in this build." }],
                 isError: true,
               };
             }
-            const result = await callbacks.requestGithubConnect({ id: randomUUID(), runId: req.runId });
+            const result = await live.callbacks.requestGithubConnect({ id: randomUUID(), runId: live.req.runId });
             if (!result.connected) {
               return {
                 content: [
@@ -914,13 +984,13 @@ export class SdkAgentSession {
             description: z.string().max(300).optional().describe("Short repository description."),
           },
           async (args) => {
-            if (!callbacks.createGithubRepo) {
+            if (!live.callbacks.createGithubRepo) {
               return {
                 content: [{ type: "text", text: "GitHub integration is unavailable in this build." }],
                 isError: true,
               };
             }
-            const res = await callbacks.createGithubRepo({
+            const res = await live.callbacks.createGithubRepo({
               name: String(args.name),
               private: args.private !== false,
               ...(args.description ? { description: String(args.description) } : {}),
@@ -1014,9 +1084,60 @@ export class SdkAgentSession {
       // (seen live) — the system-append steers it away instead, and an
       // accidental WebSearch call just upstream-errors and self-corrects.
       disallowedTools: ["AskUserQuestion"],
-      stderr: (data) => callbacks.onLog?.(data),
+      stderr: (data) => live.callbacks.onLog?.(data),
       canUseTool,
     };
+
+    return { fingerprint: engineFingerprint(req, this.conn), options, live, abort, emit, warm: null };
+  }
+
+  /**
+   * Spawn the engine NOW, without a message, so the next turn does not pay for it.
+   *
+   * Measured on this app (Windows, live gateway, 2026-08-02): between pressing
+   * Send and the first byte leaving for the gateway there were 2.3–3.7 seconds,
+   * on EVERY turn — the engine process starting and running its initialize
+   * handshake. The user reads that as "долго думает"; nothing is even asked yet.
+   *
+   * The SDK's `startup()` does exactly that handshake ahead of time. The caller
+   * warms while the user is typing, so the process is ready when they hit Send —
+   * and closes it again when they don't (see the runtime's idle timer), because
+   * an idle engine is a few hundred megabytes.
+   */
+  async prepare(req: SdkRunRequest, callbacks: AgentRunCallbacks): Promise<PreparedEngine> {
+    const prepared = this.build(req, callbacks);
+    prepared.warm = await startup({ options: prepared.options });
+    return prepared;
+  }
+
+  /** The fingerprint a prepared engine must match to be usable for `req`. */
+  fingerprintFor(req: SdkRunRequest): string {
+    return engineFingerprint(req, this.conn);
+  }
+
+  /**
+   * Run one turn. `prepared` is a warmed engine from {@link prepare} whose
+   * fingerprint matches; without one the engine is built and started here, as
+   * before. Either way the turn's own semantics — permission cards, cancellation,
+   * event mapping — are identical.
+   */
+  async run(
+    req: SdkRunRequest,
+    callbacks: AgentRunCallbacks,
+    signal: AbortSignal,
+    prepared?: PreparedEngine,
+  ): Promise<void> {
+    const engine = prepared ?? this.build(req, callbacks);
+    // A prepared engine was built for an earlier moment: this turn's request,
+    // callbacks and correlation id become the ones its tools and events use.
+    engine.live.req = req;
+    engine.live.callbacks = callbacks;
+    engine.live.correlationId = randomUUID();
+    const { emit, abort, options } = engine;
+
+    const onAbort = (): void => abort.abort();
+    if (signal.aborted) abort.abort();
+    else signal.addEventListener("abort", onAbort, { once: true });
 
     emit("run.status_changed", { from: "draft", to: req.mode === "plan" ? "planning" : "working" });
 
@@ -1028,7 +1149,10 @@ export class SdkAgentSession {
     };
 
     try {
-      for await (const msg of query({ prompt: req.prompt, options })) {
+      const stream = engine.warm
+        ? engine.warm.query(req.prompt)
+        : query({ prompt: req.prompt, options });
+      for await (const msg of stream) {
         if (signal.aborted) break;
         currentMessageId = this.mapMessage(msg, emit, currentMessageId, req, mapState);
       }
