@@ -102,7 +102,45 @@ const SAFE_ENGINE_TOOLS = new Set([
   "TaskUpdate",
   "TaskList",
   "TaskGet",
+  // Entering plan mode only NARROWS what the agent may do (the engine blocks
+  // edits and mutating commands while planning) — a card there asked the user
+  // to approve a restriction, under the meaningless title «Выполнение команды».
+  // Leaving it (ExitPlanMode) is the decision that matters, and it has its own.
+  "EnterPlanMode",
 ]);
+
+/** A tool that changes nothing on the machine and never deserves a card. */
+export function isSafeEngineTool(name: string): boolean {
+  return SAFE_ENGINE_TOOLS.has(name);
+}
+
+/**
+ * The plan-approval card for a run in `mode` — or `null` when leaving plan mode
+ * must NOT be asked about.
+ *
+ * Two facts drive this, both probed live on the engine (2026-08-07):
+ * 1. `bypassPermissions` skips the permission callback for every other tool, so
+ *    a card here is the single question a «Полный доступ» user can still get —
+ *    exactly what that mode promises never to do (reported 2026-08-07).
+ * 2. The model can enter plan mode BY ITSELF (`EnterPlanMode`), so a plan can
+ *    end in a run where the user never picked «План». The wording has to match
+ *    whose decision it was.
+ */
+export function planApprovalCard(mode: TaskMode): { reason: string; impact: string[] } | null {
+  if (mode === "bypass") return null;
+  const userChosePlan = mode === "plan";
+  return {
+    reason: userChosePlan
+      ? "Агент подготовил план и просит разрешение перейти к выполнению."
+      : "Агент спланировал задачу сам и просит разрешение перейти к выполнению.",
+    impact: [
+      userChosePlan
+        ? "Режим «План» для этой задачи завершится."
+        : "Планирование завершится, дальше действует выбранный вами режим разрешений.",
+      "Агент начнёт выполнять план: изменять файлы и запускать команды по обычным правилам разрешений.",
+    ],
+  };
+}
 
 /** Plain-language "why" shown on the permission card, per capability (RU UI). */
 const PERMISSION_REASON: Record<string, string> = {
@@ -180,6 +218,12 @@ const ASK_SYSTEM_APPEND = [
   "where several options could apply at once (areas to touch, features to include);",
   "keep it single-choice only for a genuine one-of decision. Skip the tool for trivial",
   "decisions you can safely make yourself.",
+  // Without this line models reach for the engine's own AskUserQuestion, find it
+  // absent, and report to the user that asking is «запрещено настройками» —
+  // seen live, with the model then giving up on the task (reported 2026-08-07).
+  `The engine's built-in AskUserQuestion tool is intentionally absent in this app;`,
+  `\`${ASK_TOOL}\` replaces it and always works. Never tell the user that asking or`,
+  "confirming is unavailable — ask with this tool instead.",
 ].join(" ");
 
 /**
@@ -649,10 +693,20 @@ export interface SdkRunRequest {
    */
   skills?: string[];
   /**
-   * Extra directories the engine may access without a permission ask (e.g. the
-   * app-owned folder with pasted screenshots the model opens via Read).
+   * Directories outside the project the engine may work in: the app-owned
+   * folder with pasted screenshots, plus any folder the user attached to the
+   * project («Папки проекта»). Reaching them still goes through the normal
+   * permission cards — see `appOwnedDirectories` for the ones that do not.
    */
   additionalDirectories?: string[];
+  /**
+   * The subset of the above that belongs to the APP, not the user (the pastes
+   * folder). Reads there are auto-allowed: opening a screenshot the user just
+   * pasted is not a decision worth a card. Attached project folders are NOT in
+   * here — they are the user's own files and must not become quieter than the
+   * project itself.
+   */
+  appOwnedDirectories?: string[];
   /**
    * Whether the user trusts this workspace. Trusted folders load PROJECT-level
    * settings (CLAUDE.md, .claude/settings, project commands/skills/hooks) and
@@ -922,7 +976,7 @@ export class SdkAgentSession {
       );
     };
 
-    const allowedReadRoots = (req.additionalDirectories ?? []).map(normalizeDirPrefix);
+    const allowedReadRoots = (req.appOwnedDirectories ?? []).map(normalizeDirPrefix);
     // Capabilities granted DURING this run («Разрешить для задачи/проекта») —
     // honored for the rest of the run so a coding session doesn't re-prompt on
     // every edit/command.
@@ -953,17 +1007,17 @@ export class SdkAgentSession {
       // the model went on editing files while the UI still said «План». The
       // card is explicit, and approving it grants nothing else.
       if (toolName === "ExitPlanMode") {
+        const card = planApprovalCard(live.req.mode);
+        // «Полный доступ»: no card exists for that mode — see planApprovalCard.
+        if (!card) return { behavior: "allow", updatedInput: input };
         const permReq: PermissionRequest = {
           id: randomUUID(),
           runId: live.req.runId,
           intentId: randomUUID(),
           capability: "plan",
           risk: "medium",
-          reason: "Агент подготовил план и просит разрешение перейти к выполнению.",
-          impact: [
-            "Режим «План» для этой задачи завершится.",
-            "Агент начнёт выполнять план: изменять файлы и запускать команды по обычным правилам разрешений.",
-          ],
+          reason: card.reason,
+          impact: card.impact,
           scope: { workspaceId: live.req.workspaceId },
           allowedDecisions: ["allow_once", "deny"],
         };
@@ -1493,6 +1547,32 @@ export class SdkAgentSession {
             delayMs: typeof r.retry_delay_ms === "number" ? r.retry_delay_ms : 0,
             ...(typeof r.error_status === "number" ? { status: r.error_status } : {}),
           });
+        } else if (sys.subtype === "permission_denied") {
+          // The engine refused the call on its own — the «Авто» classifier, a
+          // deny rule, or a non-asking mode — so our permission card never ran.
+          // Nothing about that reached the user before: the step stopped and the
+          // model wrote prose about being «blocked by a classifier», which reads
+          // as the app breaking (reported 2026-08-07). Name it, and mark the
+          // step denied so it does not sit as «выполняется» forever.
+          const d = msg as {
+            tool_name?: string;
+            tool_use_id?: string;
+            decision_reason_type?: string;
+            decision_reason?: string;
+            message?: string;
+          };
+          const toolName = d.tool_name ?? "";
+          // The engine's `message` is written FOR THE MODEL ("you may try another
+          // tool, but do not work around this maliciously…") — probed live in
+          // don't-ask mode. Only a short, human-sized note is worth repeating to
+          // the user; the long instruction is not.
+          const engineNote = d.decision_reason ?? d.message ?? "";
+          emit("permission.auto_denied", {
+            summary: toolName ? summarizeTool(toolName, {}) : "Действие агента",
+            ...(d.decision_reason_type ? { source: d.decision_reason_type } : {}),
+            ...(engineNote && engineNote.length <= 160 ? { reason: engineNote } : {}),
+          });
+          if (d.tool_use_id) emit("tool.updated", { id: d.tool_use_id, status: "denied" });
         } else if (sys.subtype === "task_notification") {
           // The REAL settle of a background subagent or workflow (its tool_result
           // was only a launch ack — see case "user").

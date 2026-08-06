@@ -19,7 +19,20 @@ export interface WorkspacePrefs {
   grantedCaps: string[];
   /** The agent's own cross-session notes about the project (trusted only). */
   memory: string;
+  /**
+   * Extra folders the agent may work in besides the project itself — the
+   * answer to «я работаю с двумя репозиториями сразу» (reported 2026-08-07).
+   * Chosen by the user through the OS folder picker, never by the model.
+   */
+  extraDirs: string[];
 }
+
+/**
+ * Ceiling on extra folders per project. Each one widens what the agent can
+ * touch and rides the engine's startup, so this is a deliberate handful, not a
+ * place to attach a whole drive.
+ */
+export const MAX_WORKSPACE_EXTRA_DIRS = 8;
 
 /**
  * Ceiling for the agent's project notes. Small on purpose: memory rides the
@@ -34,7 +47,20 @@ interface PrefsFile {
   migratedAt?: string;
   workspaces: Record<
     string,
-    { trusted: boolean; grantedCaps: string[]; decidedAt: string; memory?: string }
+    {
+      trusted: boolean;
+      grantedCaps: string[];
+      decidedAt: string;
+      memory?: string;
+      extraDirs?: string[];
+      /**
+       * The entry exists only because a folder was attached before the trust
+       * question was ever answered — `decided` must stay false, or the app
+       * would silently treat the project as "answered: not trusted" and never
+       * ask again. Absent on every entry a real decision wrote.
+       */
+      trustPending?: boolean;
+    }
   >;
 }
 
@@ -89,6 +115,14 @@ function sanitize(raw: PrefsFile["workspaces"]): PrefsFile["workspaces"] {
       ...(typeof entry.memory === "string" && entry.memory
         ? { memory: entry.memory.slice(0, WORKSPACE_MEMORY_MAX_CHARS) }
         : {}),
+      ...(entry.trustPending === true ? { trustPending: true as const } : {}),
+      ...(Array.isArray(entry.extraDirs)
+        ? {
+            extraDirs: entry.extraDirs
+              .filter((d): d is string => typeof d === "string" && d.trim().length > 0)
+              .slice(0, MAX_WORKSPACE_EXTRA_DIRS),
+          }
+        : {}),
     };
   }
   return out;
@@ -116,13 +150,65 @@ function persist(): void {
 export async function getWorkspacePrefs(path: string): Promise<WorkspacePrefs> {
   const file = await load();
   const entry = file.workspaces[workspaceKey(path)];
-  if (!entry) return { decided: false, trusted: false, grantedCaps: [], memory: "" };
+  if (!entry) {
+    return { decided: false, trusted: false, grantedCaps: [], memory: "", extraDirs: [] };
+  }
   return {
-    decided: true,
+    decided: entry.trustPending !== true,
     trusted: entry.trusted,
     grantedCaps: [...entry.grantedCaps],
     memory: entry.memory ?? "",
+    extraDirs: [...(entry.extraDirs ?? [])],
   };
+}
+
+/**
+ * Attach another folder to this project. The path comes from the OS picker in
+ * privileged code — never from the renderer or the model — so this only has to
+ * defend against pointless entries: duplicates, the project itself, and
+ * anything already covered by it.
+ */
+export async function addWorkspaceDir(
+  path: string,
+  dir: string,
+): Promise<{ ok: true; dirs: string[] } | { ok: false; reason: "inside_project" | "duplicate" | "too_many" }> {
+  const file = await load();
+  const key = workspaceKey(path);
+  // A folder the user never trusted/answered for still gets an entry: attaching
+  // a second folder is an explicit act and must not silently vanish.
+  const entry = (file.workspaces[key] ??= {
+    trusted: false,
+    grantedCaps: [],
+    decidedAt: new Date().toISOString(),
+    // Nothing about trust was answered here — see trustPending.
+    trustPending: true,
+  });
+  const dirs = entry.extraDirs ?? [];
+  if (isInside(dir, path)) return { ok: false, reason: "inside_project" };
+  if (dirs.some((d) => workspaceKey(d) === workspaceKey(dir))) {
+    return { ok: false, reason: "duplicate" };
+  }
+  if (dirs.length >= MAX_WORKSPACE_EXTRA_DIRS) return { ok: false, reason: "too_many" };
+  entry.extraDirs = [...dirs, dir];
+  persist();
+  return { ok: true, dirs: [...entry.extraDirs] };
+}
+
+/** Detach a folder from the project (the agent stops seeing it next turn). */
+export async function removeWorkspaceDir(path: string, dir: string): Promise<string[]> {
+  const file = await load();
+  const entry = file.workspaces[workspaceKey(path)];
+  if (!entry?.extraDirs) return [];
+  entry.extraDirs = entry.extraDirs.filter((d) => workspaceKey(d) !== workspaceKey(dir));
+  persist();
+  return [...entry.extraDirs];
+}
+
+/** Is `dir` the folder `root` itself, or somewhere inside it? */
+function isInside(dir: string, root: string): boolean {
+  const a = workspaceKey(dir);
+  const b = workspaceKey(root);
+  return a === b || a.startsWith(`${b}/`);
 }
 
 /**
@@ -155,6 +241,9 @@ export async function setWorkspaceTrust(path: string, trusted: boolean): Promise
     trusted,
     grantedCaps: trusted ? (prev?.grantedCaps ?? []) : [],
     decidedAt: new Date().toISOString(),
+    // Attached folders are the user's own choice about WHERE they work, not a
+    // trust decision — a trust toggle must not quietly detach them.
+    ...(prev?.extraDirs?.length ? { extraDirs: [...prev.extraDirs] } : {}),
   };
   persist();
 }

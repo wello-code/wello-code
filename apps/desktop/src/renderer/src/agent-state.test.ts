@@ -404,3 +404,34 @@ describe("agentReducer · subagent transcript growth", () => {
     expect(log[0]!.text).toBe("шаг 200"); // the oldest were dropped
   });
 });
+
+describe("agentReducer · refusals the engine made on its own", () => {
+  it("shows WHAT was refused and WHO refused it, with the way out", () => {
+    const s = apply(
+      initialAgentState,
+      ev("permission.auto_denied", {
+        summary: "Read C:/other/repo/notes.md",
+        source: "classifier",
+        reason: "cross-repository data transfer",
+      }),
+    );
+    const last = s.items[s.items.length - 1]!;
+    expect(last.kind).toBe("note");
+    const text = last.kind === "note" ? last.text : "";
+    expect(text).toContain("Read C:/other/repo/notes.md");
+    expect(text).toContain("cross-repository data transfer");
+    expect(text).toContain("«Авто»"); // names the mode whose judge decided
+    expect(text).toContain("«Вручную»"); // and how to take the decision back
+  });
+
+  it("does not blame «Авто» when the refusal came from somewhere else", () => {
+    const s = apply(
+      initialAgentState,
+      ev("permission.auto_denied", { summary: "Запуск команды", source: "rule" }),
+    );
+    const last = s.items[s.items.length - 1]!;
+    const text = last.kind === "note" ? last.text : "";
+    expect(text).toContain("Запуск команды");
+    expect(text).not.toContain("«Авто»");
+  });
+});

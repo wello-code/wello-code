@@ -501,6 +501,8 @@ function applyEvent(prev: AgentState, event: AgentEvent): AgentState {
     }
     case "permission.requested":
       return { ...state, pending: event.data };
+    case "permission.auto_denied":
+      return { ...state, items: [...state.items, note(event.id, autoDenialText(event.data), "danger")] };
     case "question.requested":
       return { ...state, question: event.data };
     case "github.connect_requested":
@@ -550,4 +552,29 @@ function applyEvent(prev: AgentState, event: AgentEvent): AgentState {
 
 function note(id: string, text: string, tone: "info" | "success" | "danger" | "cancelled"): TimelineItem {
   return { kind: "note", id: `note-${id}`, text, tone };
+}
+
+/**
+ * The note for a refusal the engine made without asking us. It has to answer
+ * three things at once: what was refused, who refused it, and what the user can
+ * do about it — otherwise the only trace left is the model's own confused
+ * account of being blocked.
+ */
+export function autoDenialText(data: {
+  summary: string;
+  source?: string;
+  reason?: string;
+}): string {
+  const head = `Действие отклонено автоматически: ${data.summary}`;
+  const why = data.reason?.trim() ? ` — ${data.reason.trim()}` : "";
+  // Who refused decides what advice makes sense. 'classifier' is the «Авто»
+  // mode's own judge; 'mode' is a mode that never prompts at all; anything else
+  // is a rule, where naming a mode would only mislead.
+  const hint =
+    data.source === "classifier"
+      ? " Так решил встроенный судья режима «Авто». Выберите «Вручную», чтобы решать самому, или «Полный доступ», чтобы не спрашивать."
+      : data.source === "mode"
+        ? " Текущий режим разрешает только заранее одобренное. Выберите «Вручную», чтобы решать по ходу дела."
+        : "";
+  return `${head}${why}.${hint}`;
 }

@@ -76,6 +76,8 @@ export function summarizeTool(name: string, input: Record<string, unknown>): str
       return `Find ${str(input.pattern) ?? "files"}`;
     case "WebFetch":
       return `Fetch ${str(input.url) ?? "a URL"}`;
+    case "EnterPlanMode":
+      return "Переход к планированию";
     case "ExitPlanMode":
       return "Запрос на выполнение плана";
     case "Task":

@@ -6,7 +6,9 @@ import {
   engineFingerprint,
   engineModelId,
   formatPreviewLook,
+  isSafeEngineTool,
   modelReadsToolResultImages,
+  planApprovalCard,
   projectMemoryAppend,
   githubSystemAppend,
   normalizeDirPrefix,
@@ -59,6 +61,43 @@ describe("githubSystemAppend (the anti-'gh auth login' steering)", () => {
     expect(githubSystemAppend({ connected: true, login: "octocat" }, false)).toBe(
       githubSystemAppend({ connected: true }, false),
     );
+  });
+});
+
+describe("planApprovalCard (leaving plan mode)", () => {
+  it("«Полный доступ» is never asked — the one mode that promises no questions", () => {
+    expect(planApprovalCard("bypass")).toBeNull();
+  });
+
+  it("the user's own «План» ends by their explicit approval", () => {
+    const card = planApprovalCard("plan");
+    expect(card?.reason).toContain("подготовил план");
+    expect(card?.impact[0]).toContain("«План»");
+  });
+
+  it("a plan the MODEL entered by itself does not claim the user chose «План»", () => {
+    // The engine's own EnterPlanMode can start planning in any mode; the card
+    // must not tell the user a mode they never picked is ending.
+    for (const mode of ["manual", "acceptEdits", "auto"] as const) {
+      const card = planApprovalCard(mode);
+      expect(card?.reason).toContain("сам");
+      expect(card?.impact[0]).not.toContain("«План»");
+    }
+  });
+});
+
+describe("isSafeEngineTool", () => {
+  it("entering plan mode narrows the agent — no card for it", () => {
+    expect(isSafeEngineTool("EnterPlanMode")).toBe(true);
+  });
+
+  it("leaving plan mode is NOT bookkeeping (it has its own card)", () => {
+    expect(isSafeEngineTool("ExitPlanMode")).toBe(false);
+  });
+
+  it("real actions stay gated", () => {
+    expect(isSafeEngineTool("Bash")).toBe(false);
+    expect(isSafeEngineTool("Write")).toBe(false);
   });
 });
 

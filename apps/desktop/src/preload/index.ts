@@ -8,6 +8,7 @@ import type {
   StartRunInput,
   UpdateStatus,
   WelloApi,
+  WorkspaceDirResult,
   WorkspaceInfo,
 } from "../shared/ipc-api";
 
@@ -69,6 +70,10 @@ const api: WelloApi = {
     }>,
   workspaceInstructions: (path: string) =>
     ipcRenderer.invoke("workspace.instructions", path) as Promise<{ file: string | null }>,
+  addWorkspaceDir: (path: string) =>
+    ipcRenderer.invoke("workspace.addDir", path) as Promise<WorkspaceDirResult>,
+  removeWorkspaceDir: (path: string, dir: string) =>
+    ipcRenderer.invoke("workspace.removeDir", path, dir) as Promise<string[]>,
 
   loadState: () => ipcRenderer.invoke("state.load"),
   saveState: (payload) => ipcRenderer.invoke("state.save", payload) as Promise<void>,

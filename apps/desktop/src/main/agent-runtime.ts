@@ -164,7 +164,14 @@ export class AgentRuntime {
         mcpServers,
         pluginPaths,
         skills,
-        additionalDirectories: [pastesDir()],
+        // The pastes folder plus whatever OTHER folders the user attached to
+        // this project («Папки проекта»): without them the agent is boxed into
+        // one directory, which is wrong for anyone working across two
+        // repositories at once. Not trust-gated — attaching is an explicit act
+        // in the OS picker, and it grants no project-supplied settings, only
+        // reach. Reads/writes there still pass the normal permission cards.
+        additionalDirectories: [pastesDir(), ...prefs.extraDirs],
+        appOwnedDirectories: [pastesDir()],
         // How much conversation the engine carries before summarising it. The
         // user's choice (Settings → Общее); 0 = never, i.e. the model's full
         // window. Read per run, so a change applies to the very next turn.

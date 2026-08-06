@@ -13,6 +13,7 @@ import type {
   HandoffOutcome,
   StateSavePayload,
   StartRunInput,
+  WorkspaceDirResult,
   WorkspaceInfo,
 } from "../shared/ipc-api";
 import { clearApiKey, getApiKey, setApiKey } from "./credentials";
@@ -57,10 +58,12 @@ import { ensureUserSkillsPlugin, listUserSkills } from "./user-skills";
 import { scanProjectCommands } from "./project-commands";
 import { isKnownWorkspace, registerWorkspace } from "./workspace-registry";
 import {
+  addWorkspaceDir,
   addWorkspaceGrant,
   clearWorkspaceGrants,
   getWorkspacePrefs,
   grandfatherLegacyWorkspaces,
+  removeWorkspaceDir,
   setWorkspaceMemory,
   setWorkspaceTrust,
 } from "./workspace-prefs";
@@ -514,6 +517,32 @@ function registerIpc(): void {
     typeof path === "string" && allowWorkspace(path)
       ? instructionsInfo(path)
       : { file: null },
+  );
+
+  // --- Extra project folders («Папки проекта») -------------------------------
+  // A project is one folder, and people work across two («перенеси модуль из
+  // одного репозитория в другой», reported 2026-08-07). The folder is picked
+  // in the OS dialog HERE, in privileged code: the renderer names the project
+  // it attaches to, never the path being attached.
+  ipcMain.handle("workspace.addDir", async (_e, path: string): Promise<WorkspaceDirResult> => {
+    if (typeof path !== "string" || !allowWorkspace(path)) {
+      return { ok: false, reason: "unknown_project" };
+    }
+    const options = {
+      properties: ["openDirectory" as const],
+      title: "Выберите папку, с которой агент сможет работать",
+    };
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options);
+    const dir = result.filePaths[0];
+    if (result.canceled || !dir) return { ok: false, reason: "canceled" };
+    return addWorkspaceDir(path, dir);
+  });
+  ipcMain.handle("workspace.removeDir", async (_e, path: string, dir: string): Promise<string[]> =>
+    typeof path === "string" && typeof dir === "string" && allowWorkspace(path)
+      ? removeWorkspaceDir(path, dir)
+      : [],
   );
   ipcMain.handle("state.save", (_e, payload: StateSavePayload): void => {
     if (!payload || typeof payload !== "object") return;

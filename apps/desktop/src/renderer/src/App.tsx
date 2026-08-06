@@ -447,6 +447,14 @@ const PERM_MODES: { id: TaskMode; label: string; hint: string; warn?: boolean }[
 ];
 const MODE_LS_KEY = "wello-code-mode";
 
+/** Why attaching a folder to the project did not happen (canceled stays silent). */
+const ADD_DIR_ERROR: Record<"inside_project" | "duplicate" | "too_many" | "unknown_project", string> = {
+  inside_project: "Эта папка уже внутри проекта",
+  duplicate: "Эта папка уже добавлена",
+  too_many: "Больше папок добавить нельзя",
+  unknown_project: "Проект не открыт",
+};
+
 function initialMode(): TaskMode {
   const saved = localStorage.getItem(MODE_LS_KEY);
   if (PERM_MODES.some((m) => m.id === saved)) return saved as TaskMode;
@@ -616,6 +624,8 @@ function Workspace({
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
   // The «Память проекта» viewer (agent's cross-session notes): text or closed.
   const [memoryView, setMemoryView] = useState<string | null>(null);
+  // The «Папки проекта» manager (folders attached beyond the project itself).
+  const [dirsView, setDirsView] = useState(false);
   // Home-composer toggle: start the next task in an isolated copy of the
   // project (git worktree on its own branch). Reset after every send.
   const [wtNew, setWtNew] = useState(false);
@@ -1174,7 +1184,15 @@ function Workspace({
     // The ref flips SYNCHRONOUSLY so a resumed send (whose closed-over state
     // still says "undecided") passes the gate instead of re-opening the modal.
     if (trustPathRef.current === target.path) {
-      wsTrustRef.current = { decided: true, trusted, grantedCaps: [], memory: "" };
+      wsTrustRef.current = {
+        decided: true,
+        trusted,
+        grantedCaps: [],
+        memory: "",
+        // Attached folders survive a trust answer (see setWorkspaceTrust); the
+        // authoritative list arrives with the refresh right below.
+        extraDirs: wsTrustRef.current?.extraDirs ?? [],
+      };
     }
     void window.wello
       .setWorkspaceTrust(target.path, trusted)
@@ -3020,6 +3038,10 @@ ${t.workspaceName}` : t.title
                     setChatMenuOpen(false);
                     setMemoryView(wsTrust?.memory ?? "");
                   }}
+                  onShowDirs={() => {
+                    setChatMenuOpen(false);
+                    setDirsView(true);
+                  }}
                 />
               ) : null}
             </div>
@@ -3829,6 +3851,70 @@ ${t.workspaceName}` : t.title
           onClose={() => setConflictAsk(false)}
         />
       ) : null}
+      {dirsView ? (
+        <Modal title="Папки проекта" onClose={() => setDirsView(false)}>
+          <p className="modal__body muted">
+            Агент работает в папке проекта. Здесь можно дать ему ещё папки — например второй
+            репозиторий, из которого нужно перенести код. Разрешения действуют обычные: в режиме
+            «Вручную» он так же спросит перед изменением файла.
+          </p>
+          <ul className="dirlist">
+            <li className="dirlist__row is-root">
+              <Icon name="folder" size={13} />
+              <span className="dirlist__path" title={activePath ?? ""}>
+                {activePath ?? ""}
+              </span>
+              <span className="dirlist__tag">проект</span>
+            </li>
+            {(wsTrust?.extraDirs ?? []).map((dir) => (
+              <li className="dirlist__row" key={dir}>
+                <Icon name="folder" size={13} />
+                <span className="dirlist__path" title={dir}>
+                  {dir}
+                </span>
+                <button
+                  className="icon-button"
+                  title="Убрать папку"
+                  aria-label={`Убрать папку ${dir}`}
+                  onClick={() => {
+                    const path = activePath;
+                    if (!path) return;
+                    void window.wello
+                      .removeWorkspaceDir(path, dir)
+                      .then(() => refreshWorkspaceMetaRef.current())
+                      .then(() => toast({ message: "Папка убрана", tone: "success" }));
+                  }}
+                >
+                  <Icon name="x" size={13} />
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="modal__actions">
+            <button
+              className="button sm"
+              onClick={() => {
+                const path = activePath;
+                if (!path) return;
+                void window.wello.addWorkspaceDir(path).then(async (res) => {
+                  if (res.ok) {
+                    await refreshWorkspaceMetaRef.current();
+                    toast({ message: "Папка добавлена", tone: "success" });
+                    return;
+                  }
+                  if (res.reason === "canceled") return;
+                  toast({ message: ADD_DIR_ERROR[res.reason], tone: "danger" });
+                });
+              }}
+            >
+              <Icon name="folder" size={13} />
+              Добавить папку
+            </button>
+            <span className="modal__actions-spacer" />
+            <ModalCancel fallback={() => setDirsView(false)}>Закрыть</ModalCancel>
+          </div>
+        </Modal>
+      ) : null}
       {memoryView !== null ? (
         <Modal title="Память проекта" onClose={() => setMemoryView(null)}>
           <p className="modal__body muted">
@@ -4123,6 +4209,7 @@ function ChatTitleMenu({
   onToggleTrust,
   onClearGrants,
   onShowMemory,
+  onShowDirs,
 }: {
   task: TaskItem;
   trust: WorkspaceTrust | null;
@@ -4136,6 +4223,8 @@ function ChatTitleMenu({
   onClearGrants: () => void;
   /** Show the agent's cross-session project notes (view + clear). */
   onShowMemory: () => void;
+  /** Manage the folders attached to this project besides the project itself. */
+  onShowDirs: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   useDropUp(true, onClose, rootRef);
@@ -4230,6 +4319,16 @@ function ChatTitleMenu({
               Сбросить разрешения ({trust.grantedCaps.length})
             </button>
           ) : null}
+          <button
+            className="taskmenu__item"
+            role="menuitem"
+            title="Дать агенту доступ к другим папкам — например ко второму репозиторию"
+            onClick={onShowDirs}
+          >
+            <Icon name="folder" size={13} />
+            Папки проекта
+            {trust?.extraDirs.length ? <span className="taskmenu__count">+{trust.extraDirs.length}</span> : null}
+          </button>
           {trust?.trusted && trust.memory ? (
             <button
               className="taskmenu__item"

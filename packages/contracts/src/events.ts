@@ -124,6 +124,25 @@ export const AgentEvent = z.union([
     }),
   ),
   envelope("permission.requested", PermissionRequest),
+  /**
+   * The engine refused a tool call BY ITSELF, without ever asking us — the
+   * «Авто» mode's classifier, a deny rule, or a mode that never prompts. The
+   * app used to show nothing at all in that case: the step just ended and the
+   * model later wrote prose about being «blocked», which reads as the app
+   * silently breaking (reported 2026-08-07). Shown as a timeline note so the
+   * refusal, its reason and the way out are all visible.
+   */
+  envelope(
+    "permission.auto_denied",
+    z.object({
+      /** Human-readable action, already summarized («Read C:\\…», a command). */
+      summary: z.string(),
+      /** Engine discriminator: 'classifier' | 'mode' | 'rule' | 'asyncAgent'. */
+      source: z.string().optional(),
+      /** The deciding component's own words, when it gave any. */
+      reason: z.string().optional(),
+    }),
+  ),
   envelope("question.requested", QuestionRequest),
   /**
    * The agent's github_connect tool wants GitHub connected: the chat renders a

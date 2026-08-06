@@ -72,7 +72,14 @@ export interface WorkspaceTrust {
   grantedCaps: string[];
   /** The agent's cross-session project notes (empty when none / untrusted). */
   memory: string;
+  /** Extra folders attached to this project — the agent works in them too. */
+  extraDirs: string[];
 }
+
+/** Outcome of attaching a folder to a project (the OS picker runs in main). */
+export type WorkspaceDirResult =
+  | { ok: true; dirs: string[] }
+  | { ok: false; reason: "canceled" | "inside_project" | "duplicate" | "too_many" | "unknown_project" };
 
 export interface GitFile {
   path: string;
@@ -541,6 +548,10 @@ export interface WelloApi {
   clearWorkspaceGrants(path: string): Promise<void>;
   /** Which project-instruction file the folder carries (CLAUDE.md / AGENTS.md). */
   workspaceInstructions(path: string): Promise<{ file: string | null }>;
+  /** Attach another folder to the project (opens the OS picker in main). */
+  addWorkspaceDir(path: string): Promise<WorkspaceDirResult>;
+  /** Detach an attached folder; resolves to the remaining list. */
+  removeWorkspaceDir(path: string, dir: string): Promise<string[]>;
 
   // Durable session state (tasks + last workspace survive restarts).
   loadState(): Promise<PersistedState | null>;

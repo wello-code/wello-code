@@ -3112,6 +3112,55 @@ body.is-col-resizing {
 }
 
 /* The project-memory viewer: the agent's notes verbatim, scrollable. */
+/* «Папки проекта»: the project folder plus every folder attached to it. */
+.dirlist {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.dirlist__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 6px 0 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+}
+.dirlist__row.is-root {
+  color: var(--text-primary);
+}
+.dirlist__path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  /* The tail of a path is what identifies it — keep the end, clip the middle. */
+  direction: rtl;
+  text-align: left;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: 12px / 1.4 var(--font-code);
+}
+.dirlist__tag {
+  flex: none;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 18px;
+}
+/* The «+N» badge on the menu row that opens the folder manager. */
+.taskmenu__count {
+  margin-left: auto;
+  color: var(--text-muted);
+  font: 11px / 1 var(--font-code);
+}
+
 .memoryview {
   max-height: 320px;
   overflow: auto;
