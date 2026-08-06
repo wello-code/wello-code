@@ -1304,7 +1304,12 @@ function Workspace({
     localStorage.setItem(MODEL_LS_KEY, id);
   };
 
+  // The last hands-on (non-plan) mode — where the selector returns after the
+  // user approves a plan. Falls back to «Вручную» when the app started in plan.
+  const lastNonPlanModeRef = useRef<TaskMode>(mode === "plan" ? "manual" : mode);
+
   const commitMode = (id: TaskMode): void => {
+    if (id !== "plan") lastNonPlanModeRef.current = id;
     setMode(id);
     localStorage.setItem(MODE_LS_KEY, id);
   };
@@ -2126,6 +2131,12 @@ function Workspace({
 
   const respond = async (decision: PermissionDecision): Promise<void> => {
     if (!activeTask || !pending) return;
+    // Approving the plan ends the planning phase — the mode selector follows.
+    // Left in «План», the NEXT turn would silently re-enter plan mode and the
+    // model would plan again instead of continuing the approved work.
+    if (pending.capability === "plan" && decision !== "deny" && mode === "plan") {
+      commitMode(lastNonPlanModeRef.current);
+    }
     dispatch({ type: "resolvePermission", taskId: activeTask.id });
     await window.wello.respondPermission(pending.id, decision);
   };
@@ -3055,7 +3066,12 @@ ${t.workspaceName}` : t.title
         ) : null}
 
         {activeTask?.agent.plan && activeTask.agent.plan.length > 0 ? (
-          <PlanWidget key={activeTask.id} items={activeTask.agent.plan} running={activeRunning} />
+          <PlanWidget
+            key={activeTask.id}
+            items={activeTask.agent.plan}
+            running={activeRunning}
+            onDismiss={() => dispatch({ type: "dismissPlan", taskId: activeTask.id })}
+          />
         ) : null}
 
         {ghConnect ? (
@@ -4390,19 +4406,29 @@ function ConfirmModal({
  * The agent's live plan (its TodoWrite list) as a compact checklist above the
  * composer — the same visual anchor Claude Code gives a run's progress. Every
  * TodoWrite carries the full list, so this just renders the latest snapshot.
- * Collapses to a one-line bar; auto-collapses once the run finished with every
- * item completed (the plan is history at that point, not guidance).
+ * Collapses to a one-line bar. Auto-collapses on EVERY run finish — models
+ * routinely stop updating the registry once the actual work is done, and an
+ * expanded stale checklist above the composer read as «план завис». A ✕
+ * dismisses the widget for good (until the agent posts a new plan).
  */
-function PlanWidget({ items, running }: { items: PlanTodo[]; running: boolean }) {
+function PlanWidget({
+  items,
+  running,
+  onDismiss,
+}: {
+  items: PlanTodo[];
+  running: boolean;
+  onDismiss: () => void;
+}) {
   const done = items.filter((i) => i.status === "completed").length;
-  const allDone = done === items.length;
-  const [collapsed, setCollapsed] = useState(() => !running && allDone);
+  const [collapsed, setCollapsed] = useState(() => !running);
   const prevRunningRef = useRef(running);
   useEffect(() => {
-    // Auto-collapse exactly on the run's finish (not on user re-expand later).
-    if (prevRunningRef.current && !running && allDone) setCollapsed(true);
+    // Fold on the run's finish, unfold when the next turn picks the plan back
+    // up — but never fight a toggle the user made in between.
+    if (prevRunningRef.current !== running) setCollapsed(!running);
     prevRunningRef.current = running;
-  }, [running, allDone]);
+  }, [running]);
 
   return (
     <section className={`planw ${collapsed ? "is-collapsed" : ""}`} aria-label="План агента">
@@ -4422,6 +4448,14 @@ function PlanWidget({ items, running }: { items: PlanTodo[]; running: boolean })
         <span className="planw__chev" aria-hidden>
           <Icon name={collapsed ? "chevrondown" : "chevronup"} size={11} />
         </span>
+      </button>
+      <button
+        className="planw__close"
+        aria-label="Скрыть план"
+        title="Скрыть план"
+        onClick={onDismiss}
+      >
+        <Icon name="x" size={11} />
       </button>
       {!collapsed ? (
         <ul className="planw__list">
@@ -5829,6 +5863,7 @@ const CAP_LABEL: Record<string, string> = {
   network: "Выход в интернет",
   external_url: "Открытие ссылки",
   delete: "Удаление файлов",
+  plan: "Выполнение плана",
 };
 /** Risk level as words — so it isn't conveyed by the dot color alone. */
 const RISK_LABEL: Record<string, string> = {

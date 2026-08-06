@@ -100,7 +100,7 @@ const PERMISSION_REASON: Record<string, string> = {
  * UI can branch on. Balance exhaustion is NOT retryable — retrying just fails again
  * (the user must top up), so the UI hides "retry" and offers a top-up link instead.
  */
-function classifyFailure(raw: string): { code: string; message: string; retryable: boolean } {
+export function classifyFailure(raw: string): { code: string; message: string; retryable: boolean } {
   const s = raw.toLowerCase();
   // Monthly subscription cap exhausted (the /code API bills the plan first) — checked
   // BEFORE the generic 402 branch, which would otherwise swallow it as "top up".
@@ -119,6 +119,17 @@ function classifyFailure(raw: string): { code: string; message: string; retryabl
       code: "insufficient_balance",
       message: "На балансе Wello закончились средства. Пополните счёт, чтобы продолжить.",
       retryable: false,
+    };
+  }
+  // Server-side hiccups (5xx / overload): these genuinely pass with a retry, so
+  // say that instead of the anonymous «произошла ошибка» (which reads as a bug
+  // in the app and sends people hunting through logs).
+  if (/\b(500|502|503|504|529)\b|upstream error|overloaded|service unavailable|bad gateway|internal server error/.test(s)) {
+    return {
+      code: "upstream_error",
+      message:
+        "Сбой на стороне сервиса — обычно проходит за минуту-другую. Попробуйте ещё раз.",
+      retryable: true,
     };
   }
   if (/fetch failed|enotfound|econnrefused|econnreset|etimedout|und_err|getaddrinfo|socket hang|network error|dns/.test(s)) {
@@ -446,7 +457,10 @@ export function engineFingerprint(req: SdkRunRequest, conn: WelloConnection): st
     effort: req.effort,
     mode: req.mode,
     trusted: req.trusted,
-    grants: [...(req.workspaceGrants ?? [])].sort(),
+    // Grants (task and workspace) are deliberately NOT part of the shape: the
+    // permission callback reads them through the live turn (see canUseTool), so
+    // a warmed engine honors a grant made after it was spawned — invalidating
+    // it here would only cost the user the warm start.
     skills: [...(req.skills ?? [])].sort(),
     plugins: [...(req.pluginPaths ?? [])].sort(),
     dirs: [...(req.additionalDirectories ?? [])].sort(),
@@ -520,6 +534,13 @@ export interface SdkRunRequest {
   /** Capabilities previously granted with «Разрешить для проекта» (trusted only). */
   workspaceGrants?: string[];
   /**
+   * Capabilities granted with «Разрешить для задачи» on EARLIER turns of this
+   * task. The card promises «до конца этой задачи», and a task spans many
+   * turns — without this the grant silently died with the turn's engine and
+   * every follow-up re-asked.
+   */
+  taskGrants?: string[];
+  /**
    * Project instructions the runtime injects itself (AGENTS.md — the engine only
    * loads CLAUDE.md natively). Trusted workspaces only; appended to the system
    * prompt as data from the repo.
@@ -557,6 +578,8 @@ export interface AgentRunCallbacks {
   requestQuestion(request: QuestionRequest): Promise<QuestionAnswer>;
   /** The user granted a capability for the whole workspace — persist it. */
   onWorkspaceGrant?(capability: string): void;
+  /** The user granted a capability «для задачи» — keep it for the task's later turns. */
+  onTaskGrant?(capability: string): void;
   /**
    * github_connect: a connect card was shown (the runtime emitted the event);
    * resolves once the user finished/declined the Device Flow — or the run ends.
@@ -760,18 +783,55 @@ export class SdkAgentSession {
     };
 
     const allowedReadRoots = (req.additionalDirectories ?? []).map(normalizeDirPrefix);
-    // Capabilities the user chose "allow for this task" on — honored for the rest
-    // of the run so a coding session doesn't re-prompt on every edit/command.
+    // Capabilities granted DURING this run («Разрешить для задачи/проекта») —
+    // honored for the rest of the run so a coding session doesn't re-prompt on
+    // every edit/command.
     const grantedCaps = new Set<string>();
-    // Capabilities granted «для проекта» in EARLIER runs (persisted per workspace;
-    // only trusted folders carry them — the runtime passes [] otherwise).
-    const workspaceCaps = new Set(req.workspaceGrants ?? []);
+    // Grants from EARLIER turns are read through the LIVE request, not baked in
+    // at build time: a pre-warmed engine was assembled before the latest grant
+    // existed, and must still honor it when the turn actually arrives.
+    const grantedBefore = (capability: string): boolean =>
+      (live.req.taskGrants ?? []).includes(capability) ||
+      (live.req.workspaceGrants ?? []).includes(capability);
     const canUseTool: CanUseTool = async (toolName, input) => {
       // Our own question tool is not a privileged action — it just asks the user.
       // Never gate it behind a permission card.
       if (toolName === ASK_TOOL_FQN) return { behavior: "allow", updatedInput: input };
       // The connect tool only SHOWS a card — the user decides there; no extra gate.
       if (toolName === GITHUB_CONNECT_TOOL_FQN) return { behavior: "allow", updatedInput: input };
+      // Plan approval. The ONLY door out of plan mode is this tool (probed live:
+      // the engine hard-blocks edits and mutating bash while planning, and
+      // consults this callback for ExitPlanMode). It must never be answered by a
+      // prior «command» grant — that combination silently ended plan mode and
+      // the model went on editing files while the UI still said «План». The
+      // card is explicit, and approving it grants nothing else.
+      if (toolName === "ExitPlanMode") {
+        const permReq: PermissionRequest = {
+          id: randomUUID(),
+          runId: live.req.runId,
+          intentId: randomUUID(),
+          capability: "plan",
+          risk: "medium",
+          reason: "Агент подготовил план и просит разрешение перейти к выполнению.",
+          impact: [
+            "Режим «План» для этой задачи завершится.",
+            "Агент начнёт выполнять план: изменять файлы и запускать команды по обычным правилам разрешений.",
+          ],
+          scope: { workspaceId: live.req.workspaceId },
+          allowedDecisions: ["allow_once", "deny"],
+        };
+        emit("permission.requested", permReq);
+        const decision = await live.callbacks.requestPermission(permReq);
+        if (decision === "deny") {
+          return {
+            behavior: "deny",
+            message:
+              "The user rejected the plan and chose to stay in plan mode. " +
+              "Ask what should change, or revise the plan.",
+          };
+        }
+        return { behavior: "allow", updatedInput: input };
+      }
       // Creating a repo in the user's GitHub account is a real outward action —
       // its own permission card spells out exactly what will be created.
       if (toolName === GITHUB_CREATE_REPO_TOOL_FQN) {
@@ -809,7 +869,7 @@ export class SdkAgentSession {
         }
       }
       // A prior "allow for this task/workspace" on this capability skips the card.
-      if (grantedCaps.has(capability) || workspaceCaps.has(capability)) {
+      if (grantedCaps.has(capability) || grantedBefore(capability)) {
         return { behavior: "allow", updatedInput: input };
       }
       const permReq: PermissionRequest = {
@@ -837,6 +897,9 @@ export class SdkAgentSession {
       if (decision === "allow_for_task" || decision === "allow_for_workspace") {
         grantedCaps.add(capability);
       }
+      // A task grant persists for the task's LATER turns too — the card says
+      // «до конца этой задачи», and a task is a whole conversation.
+      if (decision === "allow_for_task") live.callbacks.onTaskGrant?.(capability);
       // A workspace grant also persists for the folder's future runs.
       if (decision === "allow_for_workspace") live.callbacks.onWorkspaceGrant?.(capability);
       return { behavior: "allow", updatedInput: input };
@@ -1390,7 +1453,14 @@ export class SdkAgentSession {
         if (msg.subtype === "success") {
           mapState.result = { ok: true, summary: msg.result || "Done." };
         } else {
-          mapState.result = { ok: false, code: msg.subtype };
+          // Error frames carry the actual error texts in `errors` — without them
+          // classifyFailure only sees the subtype ("error_during_execution") and
+          // every upstream 503 collapsed into the generic «произошла ошибка».
+          const rawErrors = (msg as { errors?: unknown }).errors;
+          const texts = Array.isArray(rawErrors)
+            ? rawErrors.filter((e): e is string => typeof e === "string")
+            : [];
+          mapState.result = { ok: false, code: [msg.subtype, ...texts].join(" — ") };
         }
         const modelUsage = (msg as { modelUsage?: Record<string, { contextWindow?: number }> })
           .modelUsage;

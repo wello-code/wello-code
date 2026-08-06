@@ -197,6 +197,32 @@ describe("tasksReducer", () => {
     expect(state.tasks[0]!.agent.items.length).toBe(count + 1);
   });
 
+  it("dismissPlan clears the plan widget until the agent posts a new one", () => {
+    let state = create(initialTasksState, "a");
+    state = tasksReducer(state, {
+      type: "event",
+      event: makeEvent("plan.updated", "run-a", {
+        items: [
+          { text: "Шаг 1", status: "completed" },
+          { text: "Шаг 2", status: "pending" },
+        ],
+      }),
+    });
+    expect(state.tasks[0]!.agent.plan).toHaveLength(2);
+
+    state = tasksReducer(state, { type: "dismissPlan", taskId: "a" });
+    expect(state.tasks[0]!.agent.plan).toBeNull();
+
+    // The next plan frame brings the widget back — dismissal is not forever.
+    state = tasksReducer(state, {
+      type: "event",
+      event: makeEvent("plan.updated", "run-a", {
+        items: [{ text: "Новый шаг", status: "in_progress" }],
+      }),
+    });
+    expect(state.tasks[0]!.agent.plan).toHaveLength(1);
+  });
+
   it("reorderPinned reorders only the pinned block and survives stale ids", () => {
     let state = create(create(create(initialTasksState, "c"), "b"), "a");
     state = tasksReducer(state, { type: "setPinned", taskId: "a", pinned: true });

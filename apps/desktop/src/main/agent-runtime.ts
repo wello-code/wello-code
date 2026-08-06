@@ -59,6 +59,13 @@ export class AgentRuntime {
   private readonly pending = new Map<string, PendingPermission>();
   private readonly pendingQuestions = new Map<string, PendingQuestion>();
   private readonly pendingConnects = new Map<string, PendingGithubConnect>();
+  /**
+   * «Разрешить для задачи» grants, by task id. A task is a whole multi-turn
+   * conversation while each turn runs its own engine — kept here so the promise
+   * «до конца этой задачи» survives the turn boundary. In-memory on purpose:
+   * after an app restart the agent asks again, which is the safe direction.
+   */
+  private readonly taskGrants = new Map<string, Set<string>>();
   /** An engine spawned ahead of time, and the session that owns it. */
   private prepared: PreparedEngine | null = null;
   private preparedBy: SdkAgentSession | null = null;
@@ -148,6 +155,7 @@ export class AgentRuntime {
         mode,
         trusted,
         workspaceGrants: trusted ? prefs.grantedCaps : [],
+        taskGrants: [...(this.taskGrants.get(req.taskId) ?? [])],
         ...(projectInstructions ? { projectInstructions } : {}),
         mcpServers,
         pluginPaths,
@@ -187,6 +195,19 @@ export class AgentRuntime {
         // NEXT runs too (this run already honors it via the in-run grant set).
         onWorkspaceGrant: (capability) => {
           void addWorkspaceGrant(req.workspacePath, capability);
+        },
+        // «Разрешить для задачи» — kept for the task's later turns (see taskGrants).
+        onTaskGrant: (capability) => {
+          const set = this.taskGrants.get(req.taskId) ?? new Set<string>();
+          set.add(capability);
+          this.taskGrants.set(req.taskId, set);
+        },
+        // The engine's stderr into the main log: this is where API errors and
+        // engine diagnostics actually surface, and without it the log file had
+        // nothing to offer when a user reported «модель выдала ошибку».
+        onLog: (line) => {
+          const text = line.trim();
+          if (text) log.info(`engine: ${text.slice(0, 500)}`);
         },
         // github_connect: show the chat's one-click connect card and wait. When
         // GitHub is ALREADY connected (e.g. moments ago in this same run) the

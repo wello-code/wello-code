@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseAgentEvent } from "@wello-code/contracts";
 import {
+  classifyFailure,
   contextTokensFromUsage,
   engineFingerprint,
   engineModelId,
@@ -421,13 +422,60 @@ describe("engineFingerprint (what a warmed engine may be reused for)", () => {
     );
   });
 
-  it("does not care about the ORDER of skills or grants", () => {
-    const a = { ...base, skills: ["one", "two"], workspaceGrants: ["read", "write"] };
-    const b = { ...base, skills: ["two", "one"], workspaceGrants: ["write", "read"] };
+  it("does not care about the ORDER of skills", () => {
+    const a = { ...base, skills: ["one", "two"] };
+    const b = { ...base, skills: ["two", "one"] };
     expect(engineFingerprint(a, conn)).toBe(engineFingerprint(b, conn));
+  });
+
+  it("ignores grants entirely — the permission callback reads them live", () => {
+    // A grant made while a warmed engine already existed must not cost the
+    // user the warm start: canUseTool resolves grants through the live turn,
+    // so the fingerprint has no business varying on them.
+    expect(engineFingerprint({ ...base, workspaceGrants: ["write"] }, conn)).toBe(
+      engineFingerprint(base, conn),
+    );
+    expect(engineFingerprint({ ...base, taskGrants: ["command"] }, conn)).toBe(
+      engineFingerprint(base, conn),
+    );
   });
 
   it("never carries the key itself", () => {
     expect(engineFingerprint(base, conn)).not.toContain("wlo_live");
+  });
+});
+
+describe("classifyFailure (RU error card + retryability)", () => {
+  it("subscription cap before the generic 402 branch", () => {
+    const f = classifyFailure("HTTP 402: subscription_cap reached");
+    expect(f.code).toBe("subscription_limit");
+    expect(f.retryable).toBe(false);
+  });
+
+  it("names an upstream 5xx as a passing service hiccup, retryable", () => {
+    // The engine surfaces these as e.g. «API Error: 503 Upstream error. This is
+    // a server-side issue…» — the card must say «попробуйте ещё раз», not the
+    // anonymous «произошла ошибка» (which reads as a bug in the app).
+    for (const raw of [
+      "API Error: 503 Upstream error. This is a server-side issue",
+      "error_during_execution — API Error: 529 overloaded_error",
+      "502 Bad Gateway",
+    ]) {
+      const f = classifyFailure(raw);
+      expect(f.code).toBe("upstream_error");
+      expect(f.retryable).toBe(true);
+    }
+  });
+
+  it("keeps balance exhaustion non-retryable (402 wins over any 5xx words)", () => {
+    const f = classifyFailure("402 payment required: prepaid balance too low");
+    expect(f.code).toBe("insufficient_balance");
+    expect(f.retryable).toBe(false);
+  });
+
+  it("still falls back to the generic runtime error", () => {
+    const f = classifyFailure("error_during_execution");
+    expect(f.code).toBe("runtime_error");
+    expect(f.retryable).toBe(true);
   });
 });

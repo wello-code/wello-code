@@ -77,6 +77,7 @@ export type TasksAction =
       mode: TaskMode;
     } & UserTurnPayload)
   | { type: "cancelLocal"; taskId: string }
+  | { type: "dismissPlan"; taskId: string }
   | { type: "hydrate"; tasks: TaskItem[]; activeId: string | null }
   | { type: "rename"; taskId: string; title: string }
   | { type: "setPinned"; taskId: string; pinned: boolean }
@@ -164,6 +165,14 @@ export function tasksReducer(state: TasksState, action: TasksAction): TasksState
         cancelledRunId: t.runId,
         runId: null,
         agent: agentReducer(t.agent, { type: "cancelLocal" }),
+      }));
+    case "dismissPlan":
+      // The ✕ on the plan widget: gone until the agent posts a new plan
+      // (persists with the chat — a dismissed checklist must not resurrect
+      // on restart).
+      return mapTask(state, action.taskId, (t) => ({
+        ...t,
+        agent: { ...t.agent, plan: null },
       }));
     case "hydrate":
       // The engine process did not survive the restart, so no task is truly

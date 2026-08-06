@@ -9,6 +9,10 @@ export const PermissionCapability = z.enum([
   "network",
   "external_url",
   "delete",
+  // Plan approval (the engine's ExitPlanMode): its own capability so that no
+  // broad «command» grant can ever answer it silently — leaving plan mode is
+  // always the user's explicit decision.
+  "plan",
 ]);
 export type PermissionCapability = z.infer<typeof PermissionCapability>;
 

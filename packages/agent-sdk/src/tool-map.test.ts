@@ -22,6 +22,14 @@ describe("tool-map", () => {
     expect(classifyTool("Workflow")).toEqual({ capability: "command", risk: "low" });
   });
 
+  it("plan approval is its OWN capability — no command grant may cover it", () => {
+    // Probed live: the engine consults the permission callback for ExitPlanMode.
+    // Classified as «command» it inherited broad command grants and plan mode
+    // ended silently — the model went on editing files under a «План» selector.
+    expect(classifyTool("ExitPlanMode")).toEqual({ capability: "plan", risk: "medium" });
+    expect(summarizeTool("ExitPlanMode", {})).toBe("Запрос на выполнение плана");
+  });
+
   it("labels a Workflow with its name from input, script meta, or script path", () => {
     expect(summarizeTool("Workflow", { name: "review-changes" })).toBe("Workflow · review-changes");
     expect(

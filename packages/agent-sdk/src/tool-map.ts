@@ -15,6 +15,10 @@ function str(v: unknown): string | undefined {
 export function classifyTool(name: string): { capability: PermissionCapability; risk: RiskLevel } {
   if (/^(Read|Grep|Glob|NotebookRead|LS)$/.test(name)) return { capability: "read", risk: "low" };
   if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(name)) return { capability: "write", risk: "medium" };
+  // Plan approval — NOT a command. Classified apart so no capability grant can
+  // ever cover it (probed live: the engine consults the permission callback for
+  // ExitPlanMode, and a broad «command» auto-allow silently ended plan mode).
+  if (name === "ExitPlanMode") return { capability: "plan", risk: "medium" };
   if (/^(Bash|BashOutput|KillShell)$/.test(name)) return { capability: "command", risk: "high" };
   if (/^(WebFetch|WebSearch)$/.test(name)) return { capability: "network", risk: "medium" };
   // The subagent tool: "Task" in older engines, "Agent" in current ones.
@@ -68,6 +72,8 @@ export function summarizeTool(name: string, input: Record<string, unknown>): str
       return `Find ${str(input.pattern) ?? "files"}`;
     case "WebFetch":
       return `Fetch ${str(input.url) ?? "a URL"}`;
+    case "ExitPlanMode":
+      return "Запрос на выполнение плана";
     case "Task":
     case "Agent":
       return `Subagent · ${str(input.description) ?? str(input.subagent_type) ?? "task"}`;
