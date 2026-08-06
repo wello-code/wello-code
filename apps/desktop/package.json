@@ -1,6 +1,6 @@
 {
   "name": "@wello-code/desktop",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "Десктопный агент-разработчик Wello Code — Claude в ваших проектах",
   "private": true,
   "license": "Apache-2.0",
