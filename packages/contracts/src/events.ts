@@ -145,6 +145,23 @@ export const AgentEvent = z.union([
   ),
   envelope("changes.ready", ChangeSetSummary),
   envelope("checkpoint.created", Checkpoint),
+  /**
+   * The engine's model call failed with a retryable error and will be retried
+   * after a delay (the engine's own backoff). Surfaced so the status line can
+   * say WHY nothing is streaming — a silent retry loop over a flaky upstream
+   * looks exactly like «Думает…» for minutes otherwise. Cleared by any real
+   * progress (delta/tool) or the run's terminal event.
+   */
+  envelope(
+    "run.retrying",
+    z.object({
+      attempt: z.number(),
+      maxRetries: z.number(),
+      delayMs: z.number(),
+      /** HTTP status of the failed call; absent for pure connection errors. */
+      status: z.number().optional(),
+    }),
+  ),
   envelope("run.failed", RunFailure),
   envelope("run.completed", RunCompletion),
 ]);

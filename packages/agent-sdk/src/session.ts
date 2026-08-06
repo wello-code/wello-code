@@ -26,6 +26,7 @@ import {
   classifyTool,
   classifyToolFailure,
   describeImpact,
+  editPreview,
   summarizeTool,
   toToolIntent,
 } from "./tool-map";
@@ -872,6 +873,9 @@ export class SdkAgentSession {
       if (grantedCaps.has(capability) || grantedBefore(capability)) {
         return { behavior: "allow", updatedInput: input };
       }
+      // File edits carry a before/after excerpt — approving a write must never
+      // be blind (the card used to say only «Изменит файл X»).
+      const preview = capability === "write" ? editPreview(toolName, input) : undefined;
       const permReq: PermissionRequest = {
         id: randomUUID(),
         runId: live.req.runId,
@@ -880,6 +884,7 @@ export class SdkAgentSession {
         risk,
         reason: PERMISSION_REASON[capability] ?? "Агент запрашивает разрешение на действие.",
         impact: describeImpact(toolName, input),
+        ...(preview ? { preview } : {}),
         scope: buildScope(req.workspaceId, req.workspacePath, input),
         // Critical actions never get persistent grants; the workspace-wide grant
         // is offered only in folders the user explicitly trusts.
@@ -1264,6 +1269,22 @@ export class SdkAgentSession {
           sys.tool_use_id ?? (sys.task_id ? mapState.asyncTasks.get(sys.task_id) : undefined);
         if (sys.subtype === "init" && sys.session_id) {
           emit("run.session_started", { sessionId: sys.session_id });
+        } else if (sys.subtype === "api_retry") {
+          // The engine hit a retryable API error and is backing off. Without
+          // this frame the UI shows a plain «Думает…» through the WHOLE retry
+          // loop — over a flaky upstream that is minutes of apparent hang.
+          const r = msg as {
+            attempt?: number;
+            max_retries?: number;
+            retry_delay_ms?: number;
+            error_status?: number | null;
+          };
+          emit("run.retrying", {
+            attempt: typeof r.attempt === "number" ? r.attempt : 0,
+            maxRetries: typeof r.max_retries === "number" ? r.max_retries : 0,
+            delayMs: typeof r.retry_delay_ms === "number" ? r.retry_delay_ms : 0,
+            ...(typeof r.error_status === "number" ? { status: r.error_status } : {}),
+          });
         } else if (sys.subtype === "task_notification") {
           // The REAL settle of a background subagent or workflow (its tool_result
           // was only a launch ack — see case "user").

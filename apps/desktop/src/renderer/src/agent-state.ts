@@ -74,6 +74,10 @@ export interface AgentState {
   lastFailure: { code: string; retryable: boolean } | null;
   /** The agent's live todo list (TodoWrite snapshots) — the plan widget. */
   plan: PlanTodo[] | null;
+  /** The engine is silently retrying a failed model call (its own backoff) —
+   *  shown on the status line instead of a misleading «Думает…». Cleared by any
+   *  real progress and by the run's terminal events. */
+  retrying: { attempt: number; maxRetries: number; status?: number } | null;
 }
 
 export const initialAgentState: AgentState = {
@@ -89,6 +93,7 @@ export const initialAgentState: AgentState = {
   contextWindowTokens: null,
   lastFailure: null,
   plan: null,
+  retrying: null,
 };
 
 export interface UserTurnPayload {
@@ -141,6 +146,7 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
       contextWindowTokens: null,
       lastFailure: null,
       plan: null,
+      retrying: null,
     };
   }
   if (action.type === "followup") {
@@ -155,6 +161,7 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
       startedAt: null,
       elapsedMs: null,
       lastFailure: null,
+      retrying: null,
     };
   }
   if (action.type === "editTurn") {
@@ -175,6 +182,7 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
       elapsedMs: null,
       lastFailure: null,
       plan: null,
+      retrying: null,
     };
   }
   if (action.type === "cancelLocal") {
@@ -192,6 +200,7 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
       elapsedMs: state.startedAt ? Math.max(0, Date.parse(now) - Date.parse(state.startedAt)) : null,
       items: [...state.items, note(crypto.randomUUID(), "Запуск отменён", "cancelled")],
       lastFailure: null,
+      retrying: null,
     };
   }
   if (action.type === "resolvePermission") return { ...state, pending: null };
@@ -240,10 +249,26 @@ export function toolActionLabel(icon: IconName): string {
 /**
  * What the agent is doing RIGHT NOW, for the shimmer status line (null when idle).
  * A running tool names itself; a streaming answer is «Печатаю ответ…»; otherwise a
- * silent model turn is «Думает…» — the case that made Fable look hung.
+ * silent model turn is «Думает…» — the case that made Fable look hung. An engine
+ * retry loop names itself too: over a flaky upstream the silent backoff runs for
+ * minutes, and calling that «Думает…» is how «приложение зависло» reports happen.
  */
-export function describeCurrentAction(items: TimelineItem[], running: boolean): string | null {
+export function retryNoticeText(retrying: AgentState["retrying"]): string | null {
+  if (!retrying) return null;
+  const nth = retrying.attempt > 0 ? ` (попытка ${retrying.attempt})` : "";
+  return retrying.status && retrying.status >= 500
+    ? `Сервис отвечает ошибкой, повторяю запрос${nth}…`
+    : `Связь прерывается, повторяю запрос${nth}…`;
+}
+
+export function describeCurrentAction(
+  items: TimelineItem[],
+  running: boolean,
+  retrying?: AgentState["retrying"],
+): string | null {
   if (!running) return null;
+  const retry = retryNoticeText(retrying ?? null);
+  if (retry) return retry;
   const last = items[items.length - 1];
   if (last?.kind === "tool" && last.status === "running") return toolActionLabel(last.icon);
   if (last?.kind === "message" && !last.done && last.text.trim()) return "Печатаю ответ…";
@@ -281,8 +306,21 @@ export function finalizePlan(
 }
 
 function applyEvent(prev: AgentState, event: AgentEvent): AgentState {
-  const state = prev.startedAt ? prev : { ...prev, startedAt: event.timestamp };
+  const stamped = prev.startedAt ? prev : { ...prev, startedAt: event.timestamp };
+  // Any frame that is NOT another retry notice means the engine got through —
+  // the status line goes back to describing real work.
+  const state =
+    stamped.retrying && event.type !== "run.retrying" ? { ...stamped, retrying: null } : stamped;
   switch (event.type) {
+    case "run.retrying":
+      return {
+        ...state,
+        retrying: {
+          attempt: event.data.attempt,
+          maxRetries: event.data.maxRetries,
+          ...(typeof event.data.status === "number" ? { status: event.data.status } : {}),
+        },
+      };
     case "run.status_changed": {
       if (event.data.to === "cancelled") {
         return {

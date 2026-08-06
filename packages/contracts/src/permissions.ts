@@ -48,6 +48,11 @@ export const PermissionRequest = z.object({
   reason: z.string(),
   /** Concrete consequences shown to the user before they decide. */
   impact: z.array(z.string()),
+  /**
+   * Compact before/after excerpt for file edits (− removed / + added lines,
+   * trimmed) — so approving a write is never blind. Monospace-rendered.
+   */
+  preview: z.string().optional(),
   scope: PermissionScope,
   /** Which decisions the UI may offer (critical actions omit persistent grants). */
   allowedDecisions: z.array(PermissionDecision),

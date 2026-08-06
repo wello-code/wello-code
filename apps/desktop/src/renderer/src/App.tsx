@@ -42,7 +42,7 @@ import { chatToMarkdown, transcriptForHandoff } from "./transcript";
 import { Modal, ModalCancel } from "./Modal";
 import type { HandoffOutcome, UpdateStatus } from "../../shared/ipc-api";
 import type { TimelineItem, UserAttachment } from "./agent-state";
-import { describeCurrentAction, toolActionLabel } from "./agent-state";
+import { describeCurrentAction, retryNoticeText, toolActionLabel } from "./agent-state";
 import {
   groupTasks,
   initialTasksState,
@@ -4689,7 +4689,7 @@ function Timeline({
   /** Rewind the project + conversation to a user turn (restores files). */
   onRewindTurn: (itemId: string, runId: string) => void;
 }) {
-  const { items, running, elapsedMs, startedAt } = task.agent;
+  const { items, running, elapsedMs, startedAt, retrying } = task.agent;
   // The open image + its message siblings, so the lightbox can page between them.
   const [lightbox, setLightbox] = useState<{ paths: string[]; index: number } | null>(null);
   // Stable across renders so the memoized rows below actually skip: a fresh
@@ -4718,6 +4718,7 @@ function Timeline({
           running={running && isTrailing}
           startedAt={startedAt}
           elapsedMs={isTrailing ? elapsedMs : null}
+          retryNotice={isTrailing ? retryNoticeText(retrying) : null}
         />,
       );
     } else {
@@ -4771,7 +4772,9 @@ function Timeline({
       {nodes}
       {running && !trailingTool ? (
         <div className="turnline" aria-live="polite">
-          <span className="runstatus__label">{describeCurrentAction(items, running) ?? "Думает…"}</span>
+          <span className="runstatus__label">
+            {describeCurrentAction(items, running, retrying) ?? "Думает…"}
+          </span>
           <span className="turnline__label runstatus__time">
             {" · "}
             <LiveElapsed startedAt={startedAt} />
@@ -4838,11 +4841,15 @@ const Activity = memo(function Activity({
   running,
   startedAt,
   elapsedMs,
+  retryNotice,
 }: {
   tools: ToolItem[];
   running: boolean;
   startedAt: string | null;
   elapsedMs: number | null;
+  /** The engine's silent-retry status — shown instead of «Думает…» here too
+   *  (a retry right after a tool step lands on this strip, not the turnline). */
+  retryNotice?: string | null;
 }) {
   const [open, setOpen] = useState(running);
   const wasRunning = useRef(running);
@@ -4856,7 +4863,7 @@ const Activity = memo(function Activity({
   const label = running ? (
     <>
       <span className="runstatus__label">
-        {runningTool ? toolActionLabel(runningTool.icon) : "Думает…"}
+        {runningTool ? toolActionLabel(runningTool.icon) : (retryNotice ?? "Думает…")}
       </span>
       {" · "}
       <LiveElapsed startedAt={startedAt} />
@@ -4899,6 +4906,7 @@ const Activity = memo(function Activity({
   prev.running === next.running &&
   prev.startedAt === next.startedAt &&
   prev.elapsedMs === next.elapsedMs &&
+  prev.retryNotice === next.retryNotice &&
   sameTools(prev.tools, next.tools));
 
 /**
@@ -5953,6 +5961,25 @@ function PermissionCard({
           <span className="perm__scope-label">{detail.label}</span>
           <code className="perm__scope-value">{detail.value}</code>
         </div>
+      ) : null}
+      {request.preview ? (
+        <pre className="perm__preview" aria-label="Что изменится">
+          {request.preview.split("\n").map((line, idx) => (
+            <span
+              key={idx}
+              className={
+                line.startsWith("+")
+                  ? "perm__line--add"
+                  : line.startsWith("-")
+                    ? "perm__line--del"
+                    : "perm__line--meta"
+              }
+            >
+              {line}
+              {"\n"}
+            </span>
+          ))}
+        </pre>
       ) : null}
       <ul className="perm__impact">
         {request.impact.map((line, idx) => (

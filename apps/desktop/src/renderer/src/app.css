@@ -6243,6 +6243,28 @@ body.is-row-resizing {
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* Before/after excerpt on a file-edit card: what the approval actually applies. */
+.perm__preview {
+  margin: var(--space-2) 0 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 6px var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  font: 12px / 1.55 var(--font-code);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.perm__line--add {
+  color: var(--git-added);
+}
+.perm__line--del {
+  color: var(--git-deleted);
+}
+.perm__line--meta {
+  color: var(--text-muted);
+}
 
 /* Chat-header signal: a background task is blocked waiting for an answer. */
 .waitchip {

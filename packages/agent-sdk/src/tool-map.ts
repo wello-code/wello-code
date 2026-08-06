@@ -133,6 +133,51 @@ export function toToolIntent(name: string, input: Record<string, unknown>, cwd: 
   }
 }
 
+/** Line/length caps for the permission-card edit preview: enough to judge the
+ *  change, small enough to never bury the card's own buttons. */
+const PREVIEW_MAX_LINES = 14;
+const PREVIEW_MAX_COLS = 160;
+
+function previewSide(text: string, sign: "-" | "+", budget: number): string[] {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const shown = lines.slice(0, budget).map((l) => `${sign} ${l.slice(0, PREVIEW_MAX_COLS)}`);
+  if (lines.length > budget) shown.push(`… ещё ${lines.length - budget} строк`);
+  return shown;
+}
+
+/**
+ * The before/after excerpt for a file-edit permission card. Without it the card
+ * said only «Изменит файл X» — approving an edit was blind. Pure and defensive:
+ * returns undefined whenever there is nothing meaningful to show.
+ */
+export function editPreview(name: string, input: Record<string, unknown>): string | undefined {
+  if (name === "Edit") {
+    const oldS = str(input.old_string);
+    const newS = str(input.new_string);
+    if (oldS === undefined && newS === undefined) return undefined;
+    const half = Math.max(2, Math.floor(PREVIEW_MAX_LINES / 2));
+    const parts = [
+      ...(oldS ? previewSide(oldS, "-", half) : []),
+      ...(newS ? previewSide(newS, "+", half) : []),
+    ];
+    return parts.length > 0 ? parts.join("\n") : undefined;
+  }
+  if (name === "MultiEdit") {
+    const edits = Array.isArray(input.edits) ? input.edits : [];
+    const first = edits[0];
+    if (!first || typeof first !== "object") return undefined;
+    const head = editPreview("Edit", first as Record<string, unknown>);
+    if (!head) return undefined;
+    return edits.length > 1 ? `${head}\n… и ещё ${edits.length - 1} правок` : head;
+  }
+  if (name === "Write") {
+    const content = str(input.content);
+    if (!content) return undefined;
+    return previewSide(content, "+", PREVIEW_MAX_LINES).join("\n");
+  }
+  return undefined;
+}
+
 /** Concrete impact lines shown on the permission card (in the user's language). */
 export function describeImpact(name: string, input: Record<string, unknown>): string[] {
   if (name === "mcp__wello__web_search") {

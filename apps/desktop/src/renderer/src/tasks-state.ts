@@ -203,6 +203,9 @@ export function tasksReducer(state: TasksState, action: TasksAction): TasksState
               contextUsedTokens: t.agent.contextUsedTokens ?? null,
               contextWindowTokens: t.agent.contextWindowTokens ?? null,
               lastFailure: t.agent.lastFailure ?? null,
+              // A retry notice is as dead as `running` after a restart (and old
+              // snapshots predate the field).
+              retrying: null,
               // The engine died with the app — an "in progress" plan item is as
               // stale as `running`; back to pending, matching the note above.
               plan: finalizePlan(t.agent.plan ?? null, "pending"),

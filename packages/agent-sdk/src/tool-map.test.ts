@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyTool, classifyToolFailure, summarizeTool, toToolIntent } from "./tool-map";
+import { classifyTool, classifyToolFailure, editPreview, summarizeTool, toToolIntent } from "./tool-map";
 
 describe("tool-map", () => {
   it("classifies tools into capability + risk", () => {
@@ -58,6 +58,45 @@ describe("tool-map", () => {
       query: "foo",
       rootId: "/w",
     });
+  });
+});
+
+describe("editPreview (the before/after excerpt on write cards)", () => {
+  it("renders an Edit as removed and added lines", () => {
+    const p = editPreview("Edit", { old_string: "color=red", new_string: "color=blue" });
+    expect(p).toBe("- color=red\n+ color=blue");
+  });
+
+  it("trims long sides and counts what was cut", () => {
+    const many = Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n");
+    const p = editPreview("Edit", { old_string: many, new_string: "one" })!;
+    expect(p).toContain("- line 0");
+    expect(p).toContain("… ещё 23 строк");
+    expect(p).toContain("+ one");
+    // Never grows unbounded: the card must not bury its own buttons.
+    expect(p.split("\n").length).toBeLessThanOrEqual(16);
+  });
+
+  it("Write shows the new content as additions", () => {
+    const p = editPreview("Write", { content: "a\nb" });
+    expect(p).toBe("+ a\n+ b");
+  });
+
+  it("MultiEdit shows the first edit and counts the rest", () => {
+    const p = editPreview("MultiEdit", {
+      edits: [
+        { old_string: "x", new_string: "y" },
+        { old_string: "i", new_string: "j" },
+      ],
+    });
+    expect(p).toBe("- x\n+ y\n… и ещё 1 правок");
+  });
+
+  it("returns undefined when there is nothing meaningful to show", () => {
+    expect(editPreview("Edit", {})).toBeUndefined();
+    expect(editPreview("Write", {})).toBeUndefined();
+    expect(editPreview("MultiEdit", { edits: [] })).toBeUndefined();
+    expect(editPreview("Bash", { command: "ls" })).toBeUndefined();
   });
 });
 

@@ -171,6 +171,44 @@ describe("describeCurrentAction", () => {
   });
 });
 
+describe("agentReducer · run.retrying (the engine's silent backoff, made visible)", () => {
+  it("stores the retry notice and clears it on the next real frame", () => {
+    let state = apply(
+      initialAgentState,
+      ev("run.retrying", { attempt: 2, maxRetries: 10, delayMs: 4000, status: 503 }),
+    );
+    expect(state.retrying).toEqual({ attempt: 2, maxRetries: 10, status: 503 });
+    expect(describeCurrentAction(state.items, true, state.retrying)).toContain("повторяю запрос");
+    expect(describeCurrentAction(state.items, true, state.retrying)).toContain("попытка 2");
+
+    // A later retry frame replaces the notice (attempt count climbs)…
+    state = apply(state, ev("run.retrying", { attempt: 3, maxRetries: 10, delayMs: 8000, status: 503 }));
+    expect(state.retrying?.attempt).toBe(3);
+
+    // …and ANY real progress clears it — the call got through.
+    state = apply(state, ev("message.delta", { messageId: "m1", text: "ок" }));
+    expect(state.retrying).toBeNull();
+  });
+
+  it("a connection-class retry (no HTTP status) words itself as a network issue", () => {
+    const state = apply(
+      initialAgentState,
+      ev("run.retrying", { attempt: 1, maxRetries: 10, delayMs: 1000 }),
+    );
+    expect(describeCurrentAction(state.items, true, state.retrying)).toContain("Связь прерывается");
+  });
+
+  it("the run's terminal event drops the notice too", () => {
+    const state = apply(
+      initialAgentState,
+      ev("run.retrying", { attempt: 5, maxRetries: 10, delayMs: 1000, status: 529 }),
+      ev("run.failed", { code: "upstream_error", message: "Сбой на стороне сервиса", retryable: true }),
+    );
+    expect(state.retrying).toBeNull();
+    expect(state.running).toBe(false);
+  });
+});
+
 describe("agentReducer · recovered status", () => {
   it("passes a recovered tool status onto the tool item", () => {
     const req = ev("tool.requested", {
