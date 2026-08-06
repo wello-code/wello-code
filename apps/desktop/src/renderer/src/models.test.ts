@@ -8,9 +8,13 @@ describe("the picker", () => {
     expect(ids).toContain("gpt-5.6-sol");
   });
 
-  it("does NOT offer the broken member of that family", () => {
-    // luna errors on every request; offering it would be a button that always fails.
-    expect(MODELS.map((m) => m.id)).not.toContain("gpt-5.6-luna");
+  it("offers the whole GPT family", () => {
+    // luna was excluded while it answered errors to everything; it works now
+    // (checked with a full agent turn: streamed tool call, tool result, answer),
+    // so leaving it out would be hiding a working, cheaper option.
+    for (const id of ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]) {
+      expect(MODELS.map((m) => m.id), id).toContain(id);
+    }
   });
 
   it("keeps Claude first, because that is what the product runs on", () => {

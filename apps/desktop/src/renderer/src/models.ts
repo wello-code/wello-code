@@ -15,15 +15,13 @@ export interface PickerModel {
 /**
  * Haiku 4.5 is not in the Wello catalog; a stored selection of it falls back to
  * the first entry via initialModel()'s validation.
- *
- * `gpt-5.6-luna` is deliberately absent too: it errors on every request, and a
- * picker entry that always fails is worse than no entry.
  */
 export const MODELS: PickerModel[] = [
   { id: "claude-sonnet-5", label: "Sonnet 5", hint: "Баланс скорости и качества" },
   { id: "claude-opus-5", label: "Opus 5", hint: "Новейший Opus, максимум качества" },
   { id: "claude-opus-4-8", label: "Opus 4.8", hint: "Сложные задачи, максимум качества" },
   { id: "claude-fable-5", label: "Fable 5", hint: "Флагман с размышлениями" },
+  { id: "gpt-5.6-luna", label: "GPT Luna", hint: "Самая быстрая и дешёвая" },
   { id: "gpt-5.6-terra", label: "GPT Terra", hint: "Дешевле Claude, с размышлениями" },
   { id: "gpt-5.6-sol", label: "GPT Sol", hint: "Самая мощная в линейке GPT" },
 ];
