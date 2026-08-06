@@ -5,6 +5,9 @@ import {
   contextTokensFromUsage,
   engineFingerprint,
   engineModelId,
+  formatPreviewLook,
+  modelReadsToolResultImages,
+  projectMemoryAppend,
   githubSystemAppend,
   normalizeDirPrefix,
   pathInsideRoots,
@@ -442,6 +445,92 @@ describe("engineFingerprint (what a warmed engine may be reused for)", () => {
 
   it("never carries the key itself", () => {
     expect(engineFingerprint(base, conn)).not.toContain("wlo_live");
+  });
+});
+
+describe("projectMemoryAppend (the memory block of the system prompt)", () => {
+  it("without notes: only the contract, no notes section", () => {
+    const s = projectMemoryAppend(undefined);
+    expect(s).toContain("project_memory");
+    expect(s).toContain("REPLACES");
+    expect(s).not.toContain("current project notes");
+  });
+
+  it("with notes: the contract plus the verbatim notes", () => {
+    const s = projectMemoryAppend("Мы используем pnpm.");
+    expect(s).toContain("current project notes");
+    expect(s).toContain("Мы используем pnpm.");
+  });
+
+  it("blank notes count as none", () => {
+    expect(projectMemoryAppend("   ")).not.toContain("current project notes");
+  });
+});
+
+describe("formatPreviewLook (the preview_look tool result)", () => {
+  it("a successful capture points the model at the image and carries the console", () => {
+    const { text, isError } = formatPreviewLook({
+      ok: true,
+      imagePath: "C:/ud/pastes/preview-1.png",
+      pageUrl: "http://127.0.0.1:5173/",
+      console: ["[error] Uncaught TypeError: boom"],
+    });
+    expect(isError).toBe(false);
+    expect(text).toContain("C:/ud/pastes/preview-1.png");
+    expect(text).toContain("Read");
+    expect(text).toContain("http://127.0.0.1:5173/");
+    expect(text).toContain("Uncaught TypeError: boom");
+  });
+
+  it("a model that cannot take images in tool results is told NOT to Read it", () => {
+    // Caught live: the GPT family reaches the gateway through a bridge that
+    // rejects images inside tool results, so a Read there ends the turn with
+    // «400 … tool-result-image» instead of an answer. The console still helps.
+    const { text } = formatPreviewLook(
+      {
+        ok: true,
+        imagePath: "C:/ud/pastes/preview-1.png",
+        pageUrl: "http://127.0.0.1:5173/",
+        console: ["[error] boom"],
+      },
+      false,
+    );
+    expect(text).toContain("do NOT call Read");
+    expect(text).toContain("boom");
+    expect(text).toContain("http://127.0.0.1:5173/");
+  });
+
+  it("knows which families can take an image in a tool result", () => {
+    expect(modelReadsToolResultImages("claude-sonnet-5")).toBe(true);
+    expect(modelReadsToolResultImages("claude-opus-5")).toBe(true);
+    expect(modelReadsToolResultImages(undefined)).toBe(true); // default: engine's own
+    expect(modelReadsToolResultImages("gpt-5.6-terra")).toBe(false);
+    expect(modelReadsToolResultImages("gpt-5.6-sol")).toBe(false);
+  });
+
+  it("a closed pane instructs the model to involve the user, not to guess", () => {
+    const { text, isError } = formatPreviewLook({ ok: false, reason: "closed" });
+    expect(isError).toBe(false);
+    expect(text).toContain("not open");
+    expect(text).toContain("Do not guess");
+  });
+
+  it("a failed SAVE is reported as an app problem, not as a closed pane", () => {
+    // Caught live: a fresh profile had no pastes folder, the write failed, and
+    // the model told the user «превью не открыто» while it was open.
+    const { text, isError } = formatPreviewLook({ ok: false, reason: "write_failed" });
+    expect(isError).toBe(true);
+    expect(text).toContain("could not be saved");
+    expect(text).not.toContain("not open");
+  });
+
+  it("an empty console says so instead of an empty section", () => {
+    const { text } = formatPreviewLook({ ok: true, imagePath: "p.png", console: [] });
+    expect(text).toContain("no warnings or errors");
+  });
+
+  it("a missing callback reads as unavailable (isError)", () => {
+    expect(formatPreviewLook(null).isError).toBe(true);
   });
 });
 

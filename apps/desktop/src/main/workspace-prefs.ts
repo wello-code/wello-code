@@ -17,13 +17,25 @@ export interface WorkspacePrefs {
   trusted: boolean;
   /** Capabilities granted with «Разрешить для проекта» (only honored when trusted). */
   grantedCaps: string[];
+  /** The agent's own cross-session notes about the project (trusted only). */
+  memory: string;
 }
+
+/**
+ * Ceiling for the agent's project notes. Small on purpose: memory rides the
+ * system prompt of EVERY turn in the folder — a note that needs more than this
+ * is a session log, not memory, and the tool tells the model to tighten it.
+ */
+export const WORKSPACE_MEMORY_MAX_CHARS = 8000;
 
 interface PrefsFile {
   version: 1;
   /** Set once the legacy-state grandfather migration ran (see below). */
   migratedAt?: string;
-  workspaces: Record<string, { trusted: boolean; grantedCaps: string[]; decidedAt: string }>;
+  workspaces: Record<
+    string,
+    { trusted: boolean; grantedCaps: string[]; decidedAt: string; memory?: string }
+  >;
 }
 
 /** Case/separator-insensitive key so `C:\Foo` and `c:/foo/` land on one entry. */
@@ -74,6 +86,9 @@ function sanitize(raw: PrefsFile["workspaces"]): PrefsFile["workspaces"] {
         ? entry.grantedCaps.filter((c): c is string => typeof c === "string")
         : [],
       decidedAt: typeof entry.decidedAt === "string" ? entry.decidedAt : new Date().toISOString(),
+      ...(typeof entry.memory === "string" && entry.memory
+        ? { memory: entry.memory.slice(0, WORKSPACE_MEMORY_MAX_CHARS) }
+        : {}),
     };
   }
   return out;
@@ -101,8 +116,34 @@ function persist(): void {
 export async function getWorkspacePrefs(path: string): Promise<WorkspacePrefs> {
   const file = await load();
   const entry = file.workspaces[workspaceKey(path)];
-  if (!entry) return { decided: false, trusted: false, grantedCaps: [] };
-  return { decided: true, trusted: entry.trusted, grantedCaps: [...entry.grantedCaps] };
+  if (!entry) return { decided: false, trusted: false, grantedCaps: [], memory: "" };
+  return {
+    decided: true,
+    trusted: entry.trusted,
+    grantedCaps: [...entry.grantedCaps],
+    memory: entry.memory ?? "",
+  };
+}
+
+/**
+ * Replace the agent's project notes. Whole-text semantics on purpose: the model
+ * reads the current notes from its system prompt and writes the tightened full
+ * version back — that keeps the notes self-compacting instead of append-only.
+ * Untrusted folders never store memory (same rule as every project input).
+ */
+export async function setWorkspaceMemory(
+  path: string,
+  memory: string,
+): Promise<{ ok: true } | { ok: false; reason: "untrusted" | "too_long" }> {
+  const file = await load();
+  const entry = file.workspaces[workspaceKey(path)];
+  if (!entry || !entry.trusted) return { ok: false, reason: "untrusted" };
+  if (memory.length > WORKSPACE_MEMORY_MAX_CHARS) return { ok: false, reason: "too_long" };
+  const trimmed = memory.trim();
+  if (trimmed) entry.memory = trimmed;
+  else delete entry.memory;
+  persist();
+  return { ok: true };
 }
 
 /** Record the user's trust decision. Revoking trust also revokes every grant. */

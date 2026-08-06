@@ -56,7 +56,7 @@ import { detectMention, rankFileMentions, type MentionQuery } from "./file-menti
 import { matchHotkey } from "./hotkeys";
 import { mergeQueued } from "./queued";
 import { contextAdvice } from "./context-cost";
-import { MODELS, contextWindowFor } from "./models";
+import { MODELS, contextWindowFor, modelAvailability } from "./models";
 import { deriveProjects, filterByProject, projectExists, type Project } from "./projects";
 import { detectSlash, rankSlashCommands, type SlashQuery } from "./slash-command";
 import { commandArgString, expandCommandTemplate } from "../../shared/slash-template";
@@ -518,6 +518,28 @@ function Workspace({
   const [mode, setMode] = useState<TaskMode>(initialMode);
   const [model, setModel] = useState<string>(initialModel);
   const [effort, setEffort] = useState<Effort>(initialEffort);
+  // Per-model availability from the gateway's public status: the picker marks
+  // models that are down instead of letting the user find out via an error.
+  // Polled gently; null (status unreachable) marks nothing.
+  const [modelHealth, setModelHealth] = useState<Record<string, string> | null>(null);
+  useEffect(() => {
+    let dead = false;
+    const poll = (): void => {
+      if (document.hidden) return; // no network churn for a backgrounded window
+      void window.wello
+        .modelStatus()
+        .then((s) => {
+          if (!dead) setModelHealth(s);
+        })
+        .catch(() => {});
+    };
+    poll();
+    const id = setInterval(poll, 90_000);
+    return () => {
+      dead = true;
+      clearInterval(id);
+    };
+  }, []);
   const [prompt, setPrompt] = useState("");
   const [state, dispatch] = useReducer(tasksReducer, initialTasksState);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -592,6 +614,11 @@ function Workspace({
   const [updateHidden, setUpdateHidden] = useState(false);
   const [taskMenuId, setTaskMenuId] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
+  // The «Память проекта» viewer (agent's cross-session notes): text or closed.
+  const [memoryView, setMemoryView] = useState<string | null>(null);
+  // Home-composer toggle: start the next task in an isolated copy of the
+  // project (git worktree on its own branch). Reset after every send.
+  const [wtNew, setWtNew] = useState(false);
   const [deleting, setDeleting] = useState<{ id: string; title: string } | null>(null);
   // Sign-out asks for confirmation (one modal for the footer menu AND settings).
   const [signOutAsk, setSignOutAsk] = useState(false);
@@ -1147,7 +1174,7 @@ function Workspace({
     // The ref flips SYNCHRONOUSLY so a resumed send (whose closed-over state
     // still says "undecided") passes the gate instead of re-opening the modal.
     if (trustPathRef.current === target.path) {
-      wsTrustRef.current = { decided: true, trusted, grantedCaps: [] };
+      wsTrustRef.current = { decided: true, trusted, grantedCaps: [], memory: "" };
     }
     void window.wello
       .setWorkspaceTrust(target.path, trusted)
@@ -1432,6 +1459,20 @@ function Workspace({
     }
     // A new chat requires a folder picked in the strip above the composer.
     if (!workspace) return;
+    // «В копии проекта»: cut a worktree first and bind the task to it. A
+    // failure keeps the prompt in the composer — nothing is silently lost.
+    let taskWorkspace = { path: workspace.path, name: workspace.name };
+    let worktreeMeta: { origin: string; branch: string } | null = null;
+    if (wtNew) {
+      const wt = await window.wello.worktreeCreate(workspace.path);
+      if (!wt.ok) {
+        toast({ message: `Не удалось создать копию: ${wt.error}`, tone: "danger" });
+        return;
+      }
+      taskWorkspace = { path: wt.path, name: `${workspace.name} · копия` };
+      worktreeMeta = { origin: workspace.path, branch: wt.branch };
+      setWtNew(false);
+    }
     // The FIRST send leaves the centered empty state — one continuous top-down
     // scene, not three simultaneous jolts: at t=0 the title fades up and out
     // (180ms) while the composer starts its 520ms expo-out fall; the user's
@@ -1468,15 +1509,16 @@ function Workspace({
         (content.images?.length ? "Изображение" : "Новая задача"),
       mode,
       runId,
-      workspacePath: workspace.path,
-      workspaceName: workspace.name,
+      workspacePath: taskWorkspace.path,
+      workspaceName: taskWorkspace.name,
+      ...(worktreeMeta ? { worktree: worktreeMeta } : {}),
       ...turn,
     });
     const input: StartRunInput = {
       taskId,
       runId,
       workspaceId: taskId,
-      workspacePath: workspace.path,
+      workspacePath: taskWorkspace.path,
       mode,
       prompt: fullText,
       model,
@@ -2906,6 +2948,18 @@ ${t.workspaceName}` : t.title
                 onClick={() => setChatMenuOpen((v) => !v)}
               >
                 <span className="chattitle__text">{activeTask.title}</span>
+                {activeTask.worktree ? (
+                  // A task working in an isolated copy must SAY so — otherwise
+                  // «где мои изменения?» is the next question (they are on the
+                  // copy's branch, not in the folder the user has open).
+                  <span
+                    className="chattitle__wt"
+                    title={`Задача работает в копии проекта, ветка ${activeTask.worktree.branch}`}
+                  >
+                    <Icon name="gitbranch" size={11} />
+                    копия
+                  </span>
+                ) : null}
                 <Icon name="chevrondown" size={12} />
               </button>
               {chatMenuOpen ? (
@@ -2961,6 +3015,10 @@ ${t.workspaceName}` : t.title
                       .clearWorkspaceGrants(path)
                       .then(() => refreshWorkspaceMetaRef.current())
                       .then(() => toast({ message: "Разрешения проекта сброшены", tone: "success" }));
+                  }}
+                  onShowMemory={() => {
+                    setChatMenuOpen(false);
+                    setMemoryView(wsTrust?.memory ?? "");
                   }}
                 />
               ) : null}
@@ -3105,11 +3163,30 @@ ${t.workspaceName}` : t.title
           ) : null}
           <div className="composer__stack">
             {!activeTask ? (
-              <button className="composer__project" onClick={() => void openFolder()}>
-                <Icon name="folder" size={15} />
-                <span className="composer__project-name">{workspace ? workspace.name : "Выбрать проект"}</span>
-                {workspace ? <span className="composer__project-path">{workspace.path}</span> : null}
-              </button>
+              <div className="composer__projectrow">
+                <button className="composer__project" onClick={() => void openFolder()}>
+                  <Icon name="folder" size={15} />
+                  <span className="composer__project-name">{workspace ? workspace.name : "Выбрать проект"}</span>
+                  {workspace ? <span className="composer__project-path">{workspace.path}</span> : null}
+                </button>
+                {workspace && branch?.isRepo && !branch.unborn ? (
+                  <button
+                    className={`wtchip ${wtNew ? "is-on" : ""}`}
+                    role="switch"
+                    aria-checked={wtNew}
+                    title={
+                      wtNew
+                        ? "Задача пойдёт в отдельной копии проекта (git worktree) на своей ветке — основная папка не тронется"
+                        : "Выполнить задачу в отдельной копии проекта, чтобы работать параллельно с другими задачами"
+                    }
+                    onClick={() => setWtNew((v) => !v)}
+                  >
+                    <Icon name="gitbranch" size={12} />
+                    в копии проекта
+                    {wtNew ? <Icon name="check" size={12} /> : null}
+                  </button>
+                ) : null}
+              </div>
             ) : null}
             <div
               className={`composer__box ${dragOver && !activeRunning ? "is-dragover" : ""} ${
@@ -3552,6 +3629,7 @@ ${t.workspaceName}` : t.title
                     effort={effort}
                     onEffort={selectEffort}
                     disabled={activeRunning}
+                    health={modelHealth}
                   />
                   {activeRunning ? (
                     <button className="sendbtn sendbtn--stop" title="Остановить" onClick={() => void cancel()}>
@@ -3598,6 +3676,15 @@ ${t.workspaceName}` : t.title
           onToggleMax={toggleMaxPanel}
           onResize={setStackWidth}
           onResizeEnd={(w) => saveDockPrefs({ w })}
+          onSendReview={(prompt) => {
+            // One follow-up turn out of the collected line comments. A running
+            // turn would silently swallow sendText — say why instead.
+            if (activeRunning) {
+              toast({ message: "Агент ещё работает — отправьте замечания после ответа" });
+              return;
+            }
+            void sendText(prompt);
+          }}
           onRepoChanged={() => {
             void refreshBranchRef.current();
             if (activeTask) void loadChanges(activeTask.id);
@@ -3628,6 +3715,23 @@ ${t.workspaceName}` : t.title
             if (state.activeId === deleting.id) setPrompt("");
             // Drop this task's git-less review snapshot (no-op for git repos).
             void window.wello.reviewForget(deleting.id);
+            // A worktree task takes its project copy with it — UNLESS the copy
+            // holds uncommitted work: then the folder stays (deleting a chat
+            // must never delete unsaved code) and the toast says where.
+            const wtTask = state.tasks.find((t) => t.id === deleting.id);
+            if (wtTask?.worktree && wtTask.workspacePath) {
+              const wtPath = wtTask.workspacePath;
+              void window.wello
+                .worktreeRemove(wtTask.worktree.origin, wtPath)
+                .then((res) => {
+                  if (!res.ok && res.dirty) {
+                    toast({
+                      message: `В копии остались несохранённые изменения — папка сохранена: ${wtPath}`,
+                    });
+                  }
+                })
+                .catch(() => {});
+            }
             dispatch({ type: "delete", taskId: deleting.id });
             setDeleting(null);
           }}
@@ -3724,6 +3828,34 @@ ${t.workspaceName}` : t.title
           }}
           onClose={() => setConflictAsk(false)}
         />
+      ) : null}
+      {memoryView !== null ? (
+        <Modal title="Память проекта" onClose={() => setMemoryView(null)}>
+          <p className="modal__body muted">
+            Заметки, которые агент ведёт об этом проекте между сессиями. Он видит их в начале
+            каждой задачи в этой папке и обновляет сам (или по вашей просьбе «запомни…»).
+          </p>
+          <pre className="memoryview">{memoryView || "(пока пусто)"}</pre>
+          <div className="modal__actions">
+            <button
+              className="button sm danger-solid"
+              disabled={!memoryView}
+              onClick={() => {
+                const path = activePath;
+                setMemoryView(null);
+                if (!path) return;
+                void window.wello
+                  .clearWorkspaceMemory(path)
+                  .then(() => refreshWorkspaceMetaRef.current())
+                  .then(() => toast({ message: "Память проекта очищена", tone: "success" }));
+              }}
+            >
+              Очистить
+            </button>
+            <span className="modal__actions-spacer" />
+            <ModalCancel fallback={() => setMemoryView(null)}>Закрыть</ModalCancel>
+          </div>
+        </Modal>
       ) : null}
       {closeAsk ? (
         <Modal title="Идёт генерация" onClose={() => setCloseAsk(false)}>
@@ -3990,6 +4122,7 @@ function ChatTitleMenu({
   onContinueNew,
   onToggleTrust,
   onClearGrants,
+  onShowMemory,
 }: {
   task: TaskItem;
   trust: WorkspaceTrust | null;
@@ -4001,6 +4134,8 @@ function ChatTitleMenu({
   onContinueNew: () => void;
   onToggleTrust: (trusted: boolean) => void;
   onClearGrants: () => void;
+  /** Show the agent's cross-session project notes (view + clear). */
+  onShowMemory: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   useDropUp(true, onClose, rootRef);
@@ -4093,6 +4228,17 @@ function ChatTitleMenu({
             >
               <Icon name="x" size={13} />
               Сбросить разрешения ({trust.grantedCaps.length})
+            </button>
+          ) : null}
+          {trust?.trusted && trust.memory ? (
+            <button
+              className="taskmenu__item"
+              role="menuitem"
+              title="Заметки, которые агент ведёт об этом проекте между сессиями"
+              onClick={onShowMemory}
+            >
+              <Icon name="compose" size={13} />
+              Память проекта
             </button>
           ) : null}
         </>
@@ -5575,17 +5721,23 @@ function ModelSelect({
   effort,
   onEffort,
   disabled,
+  health,
 }: {
   value: string;
   onChange: (id: string) => void;
   effort: Effort;
   onEffort: (e: Effort) => void;
   disabled: boolean;
+  /** Gateway's public per-model availability; null → no marks (see modelAvailability). */
+  health: Record<string, string> | null;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   useDropUp(open, () => setOpen(false), rootRef);
   const current = MODELS.find((m) => m.id === value) ?? MODELS[0]!;
+  const currentDown = modelAvailability(health, current.id) === false;
+  // The honest way out of an outage: the first model that IS being served.
+  const alive = MODELS.find((m) => modelAvailability(health, m.id) !== false);
 
   return (
     <div className="modelsel" ref={rootRef}>
@@ -5594,9 +5746,14 @@ function ModelSelect({
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title="Модель и усилие"
+        title={
+          currentDown
+            ? `${current.label} сейчас недоступна — выберите другую модель`
+            : "Модель и усилие"
+        }
         onClick={() => setOpen((v) => !v)}
       >
+        {currentDown ? <span className="modelsel__downdot" aria-hidden /> : null}
         {current.label}
         <span className={`modelsel__badge ${effort === "ultra" ? "modelsel__badge--ultra" : ""}`}>
           {effort === "ultra" ? "Ультра" : EFFORT_LABEL[effort]}
@@ -5608,24 +5765,38 @@ function ModelSelect({
       {open ? (
         <div className="modelsel__menu" role="listbox" aria-label="Модель">
           <p className="modelsel__caption">Модель</p>
-          {MODELS.map((m) => (
-            <button
-              key={m.id}
-              className={`modelsel__item ${m.id === value ? "is-active" : ""}`}
-              role="option"
-              aria-selected={m.id === value}
-              onClick={() => {
-                onChange(m.id);
-                setOpen(false);
-              }}
-            >
-              <span className="modelsel__item-body">
-                <span className="modelsel__item-label">{m.label}</span>
-                <span className="modelsel__item-hint">{m.hint}</span>
-              </span>
-              {m.id === value ? <Icon name="check" size={13} /> : null}
-            </button>
-          ))}
+          {currentDown ? (
+            <p className="modelsel__outage" role="status">
+              {current.label} сейчас недоступна — сервис восстанавливается.
+              {alive && alive.id !== current.id ? ` Пока можно взять ${alive.label}.` : ""}
+            </p>
+          ) : null}
+          {MODELS.map((m) => {
+            const down = modelAvailability(health, m.id) === false;
+            return (
+              <button
+                key={m.id}
+                className={`modelsel__item ${m.id === value ? "is-active" : ""} ${down ? "is-down" : ""}`}
+                role="option"
+                aria-selected={m.id === value}
+                onClick={() => {
+                  onChange(m.id);
+                  setOpen(false);
+                }}
+              >
+                <span className="modelsel__item-body">
+                  <span className="modelsel__item-label">
+                    {m.label}
+                    {down ? <span className="modelsel__downdot" aria-hidden /> : null}
+                  </span>
+                  <span className="modelsel__item-hint">
+                    {down ? "Сейчас недоступна — сервис восстанавливается" : m.hint}
+                  </span>
+                </span>
+                {m.id === value ? <Icon name="check" size={13} /> : null}
+              </button>
+            );
+          })}
           <div className="effort">
             <div className="effort__head">
               <span className="modelsel__caption">Усилие</span>

@@ -88,6 +88,29 @@ export interface AccessInfo {
   paygBalanceCents: number;
 }
 
+/**
+ * Public per-model availability from the gateway's status endpoint (no auth).
+ * Null on any failure — the picker simply shows no health marks then; a status
+ * hiccup must never look like "все модели лежат".
+ */
+export async function fetchModelStatus(): Promise<Record<string, string> | null> {
+  try {
+    const res = await fetch(`${BASE_URL}/v1/status`, { signal: AbortSignal.timeout(8_000) });
+    if (!res.ok) return null;
+    const body = (await res.json()) as {
+      models?: Record<string, { availability?: string }>;
+    };
+    if (!body.models || typeof body.models !== "object") return null;
+    const out: Record<string, string> = {};
+    for (const [id, entry] of Object.entries(body.models)) {
+      if (entry && typeof entry.availability === "string") out[id] = entry.availability;
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchBalance(apiKey: string): Promise<BalanceInfo> {
   // A 15s timeout keeps a black-holed connection (captive portal, dropped socket)
   // from hanging the startup connection check forever.

@@ -1,5 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { FALLBACK_CONTEXT_WINDOW, MODELS, contextWindowFor } from "./models";
+import { FALLBACK_CONTEXT_WINDOW, MODELS, contextWindowFor, modelAvailability } from "./models";
+
+describe("modelAvailability (picker health marks)", () => {
+  // A live shape from the gateway's public status: catalog ids with dots.
+  const status = {
+    "claude-sonnet-5": "available",
+    "claude-opus-4.8": "unavailable",
+    "gpt-5.6-terra": "available",
+  };
+
+  it("matches across the dot/dash id split (opus-4.8 ↔ opus-4-8)", () => {
+    expect(modelAvailability(status, "claude-opus-4-8")).toBe(false);
+    expect(modelAvailability(status, "claude-sonnet-5")).toBe(true);
+    expect(modelAvailability(status, "gpt-5.6-terra")).toBe(true);
+  });
+
+  it("unknown model or missing status marks NOTHING (three-valued)", () => {
+    // A status hiccup must never read as «все модели лежат».
+    expect(modelAvailability(status, "some-future-model")).toBeNull();
+    expect(modelAvailability(null, "claude-sonnet-5")).toBeNull();
+    expect(modelAvailability(undefined, "claude-sonnet-5")).toBeNull();
+  });
+
+  it("only an explicit non-available value counts as down", () => {
+    expect(modelAvailability({ "claude-sonnet-5": "degraded" }, "claude-sonnet-5")).toBe(false);
+  });
+});
 
 describe("the picker", () => {
   it("offers the GPT family alongside Claude", () => {

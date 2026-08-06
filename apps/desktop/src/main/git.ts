@@ -187,6 +187,39 @@ export async function commitAll(cwd: string, message: string): Promise<CommitRes
   }
 }
 
+/* ── Worktrees: parallel tasks in isolated checkouts ────────────────────────
+   A linked worktree is the market's unit of agent isolation: same repo, own
+   files, own branch — two tasks stop stepping on each other's working tree. */
+
+/** Create a linked worktree at `dir` on a NEW branch cut from HEAD. */
+export async function worktreeAdd(cwd: string, dir: string, branch: string): Promise<CommitResult> {
+  try {
+    await git(cwd, ["worktree", "add", "-b", branch, dir, "HEAD"]);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, stderr: errText(err) };
+  }
+}
+
+/**
+ * Remove a linked worktree. NEVER forces: a dirty worktree (uncommitted user
+ * work) is refused by git and reported as `dirty` — the folder stays on disk,
+ * because deleting a chat must not be able to delete unsaved code.
+ */
+export async function worktreeRemove(
+  cwd: string,
+  dir: string,
+): Promise<{ ok: boolean; dirty?: boolean; stderr?: string }> {
+  try {
+    await git(cwd, ["worktree", "remove", dir]);
+    return { ok: true };
+  } catch (err) {
+    const stderr = errText(err);
+    const dirty = /contains modified or untracked files|is dirty/i.test(stderr);
+    return { ok: false, ...(dirty ? { dirty: true } : {}), stderr };
+  }
+}
+
 /** `git init` for a plain folder — flips the review dispatcher to the git backend. */
 export async function init(cwd: string): Promise<CommitResult> {
   try {

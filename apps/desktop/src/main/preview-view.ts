@@ -8,6 +8,7 @@
  * (it sends the pane's rectangle); this module owns the web contents.
  */
 import { BrowserWindow, session, WebContentsView } from "electron";
+import { ConsoleTail, consoleLine } from "./preview-console";
 
 export interface PreviewViewBounds {
   x: number;
@@ -41,6 +42,34 @@ let lastBounds: PreviewViewBounds = { x: 0, y: 0, width: 0, height: 0 };
 /** disableDeviceEmulation() on a webContents that never emulated CRASHES
  *  Electron 33 on Windows natively (found the hard way) — track the state. */
 let emulationOn = false;
+
+/**
+ * Rolling tail of the page's console — the agent's window into runtime errors
+ * (`preview_look` returns it next to the screenshot). Logic lives in
+ * preview-console.ts (pure, tested); this module only feeds it events.
+ */
+const consoleTail = new ConsoleTail();
+
+function pushConsole(line: string | null): void {
+  consoleTail.push(line);
+}
+
+/** The captured console tail (oldest first). */
+export function previewConsoleTail(): string[] {
+  return consoleTail.snapshot();
+}
+
+/** Whether the pane is actually on screen with a live page. */
+export function previewViewAttached(): boolean {
+  return attached && !!view && !view.webContents.isDestroyed();
+}
+
+/** Current page URL (null when the pane is closed or empty). */
+export function previewViewUrl(): string | null {
+  if (!previewViewAttached()) return null;
+  const url = view!.webContents.getURL();
+  return url || null;
+}
 
 function isWebUrl(url: string): boolean {
   try {
@@ -136,6 +165,24 @@ function ensureView(): WebContentsView {
   wc.on("did-stop-loading", sendState);
   wc.on("did-fail-load", sendState);
   wc.on("dom-ready", applyDevice);
+  // The page's own console, for preview_look. Electron has shipped two shapes
+  // of this event (positional args vs an event object with fields) — read both,
+  // whichever carries the data. A navigation marks a boundary so stale errors
+  // are attributable to the page they came from.
+  (wc as unknown as {
+    on(name: string, cb: (...args: unknown[]) => void): void;
+  }).on("console-message", (event, legacyLevel, legacyMessage) => {
+    const d = (event ?? {}) as { level?: unknown; message?: unknown };
+    pushConsole(consoleLine(d.level ?? legacyLevel, d.message ?? legacyMessage));
+  });
+  wc.on("did-navigate", (_e, url) => {
+    pushConsole(`— переход: ${String(url).slice(0, 200)}`);
+  });
+  wc.on("did-fail-load", (_e, code, desc, url) => {
+    if (code !== -3 /* aborted — normal during reloads */) {
+      pushConsole(`[error] страница не загрузилась (${desc || code}): ${String(url).slice(0, 200)}`);
+    }
+  });
   return view;
 }
 

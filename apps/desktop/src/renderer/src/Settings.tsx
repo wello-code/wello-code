@@ -744,6 +744,28 @@ function GeneralPage({
               </button>
             }
           />
+          {/* The whole bug report in one file: versions, load, log tail — with
+              anything token-shaped scrubbed. Answers «какие логи прислать?». */}
+          <Row
+            rowId="about-support-report"
+            title="Отчёт для поддержки"
+            desc="Один файл со всем, что нужно поддержке: версии, нагрузка и хвост журнала. Секреты вычищены. Просто приложите его к обращению."
+            control={
+              <button
+                className="button"
+                onClick={() => {
+                  void window.wello
+                    .supportReport()
+                    .then(() => toast({ message: "Файл готов — показан в проводнике", tone: "success" }))
+                    .catch(() =>
+                      toast({ message: "Не удалось собрать отчёт", tone: "danger" }),
+                    );
+                }}
+              >
+                Собрать файл
+              </button>
+            }
+          />
         </Card>
       </Section>
     </PageShell>

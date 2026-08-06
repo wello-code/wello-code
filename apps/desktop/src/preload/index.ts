@@ -20,6 +20,7 @@ const api: WelloApi = {
   getAppInfo: () => ipcRenderer.invoke("app.getInfo") as Promise<AppInfo>,
   showLog: () => ipcRenderer.invoke("app.showLog") as Promise<void>,
   perfReport: () => ipcRenderer.invoke("app.perfReport") as Promise<string>,
+  supportReport: () => ipcRenderer.invoke("app.supportReport") as Promise<string>,
   getUpdateStatus: () => ipcRenderer.invoke("update.status") as Promise<UpdateStatus>,
   checkForUpdates: () => ipcRenderer.invoke("update.check") as Promise<void>,
   downloadUpdate: () => ipcRenderer.invoke("update.download") as Promise<void>,
@@ -46,6 +47,7 @@ const api: WelloApi = {
   getConnection: () => ipcRenderer.invoke("wello.getConnection") as Promise<Connection>,
   setPaygOverflow: (enabled) =>
     ipcRenderer.invoke("wello.setPaygOverflow", enabled) as Promise<Connection>,
+  modelStatus: () => ipcRenderer.invoke("wello.modelStatus") as Promise<Record<string, string> | null>,
   clearApiKey: () => ipcRenderer.invoke("wello.clearApiKey") as Promise<void>,
 
   openWorkspace: () => ipcRenderer.invoke("workspace.open") as Promise<WorkspaceInfo | null>,
@@ -54,6 +56,17 @@ const api: WelloApi = {
     ipcRenderer.invoke("workspace.setTrust", path, trusted) as Promise<void>,
   clearWorkspaceGrants: (path: string) =>
     ipcRenderer.invoke("workspace.clearGrants", path) as Promise<void>,
+  clearWorkspaceMemory: (path: string) =>
+    ipcRenderer.invoke("workspace.clearMemory", path) as Promise<{ ok: boolean }>,
+  worktreeCreate: (originPath: string) =>
+    ipcRenderer.invoke("worktree.create", originPath) as Promise<
+      { ok: true; path: string; branch: string } | { ok: false; error: string }
+    >,
+  worktreeRemove: (originPath: string, worktreePath: string) =>
+    ipcRenderer.invoke("worktree.remove", originPath, worktreePath) as Promise<{
+      ok: boolean;
+      dirty?: boolean;
+    }>,
   workspaceInstructions: (path: string) =>
     ipcRenderer.invoke("workspace.instructions", path) as Promise<{ file: string | null }>,
 

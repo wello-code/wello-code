@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangedFile, ChangeSummary } from "../../shared/ipc-api";
+import { buildReviewPrompt, type DiffComment } from "./diff-comments";
 import { highlight, languageForPath } from "./highlight";
 import { Icon } from "./Icon";
 import { toast } from "./Toaster";
@@ -19,6 +20,14 @@ function splitPath(path: string): { dir: string; name: string } {
   return { dir: path.slice(0, idx + 1), name: path.slice(idx + 1) };
 }
 
+function plural(n: number, one: string, few: string, many: string): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+
 /** The Review tab: uncommitted files with per-file counts, a numbered diff and
  *  (in a git repo) the commit-as-accept bar; a plain folder offers git init. */
 export function ReviewPane({
@@ -28,6 +37,7 @@ export function ReviewPane({
   model,
   onOpenFile,
   onRepoChanged,
+  onSendReview,
 }: {
   workspacePath: string;
   taskId: string;
@@ -37,11 +47,15 @@ export function ReviewPane({
   onOpenFile: (path: string) => void;
   /** Init/commit changed the repo state — the app refreshes the chip and the card. */
   onRepoChanged: () => void;
+  /** Send the collected line comments to the agent as one follow-up turn. */
+  onSendReview: (prompt: string) => void;
 }) {
   const [summary, setSummary] = useState<ChangeSummary | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [diff, setDiff] = useState<string>("");
   const [busy, setBusy] = useState(false);
+  // Line comments collected across files; sent as one batch, cleared after.
+  const [comments, setComments] = useState<DiffComment[]>([]);
   // Reverting is destructive (new files are permanently deleted, edits discarded),
   // so it takes two clicks — matching the inline change-set card. The armed row
   // resets on its own after a few seconds.
@@ -215,6 +229,28 @@ export function ReviewPane({
           </li>
         ))}
       </ul>
+      {comments.length > 0 ? (
+        <div className="reviewbar" role="status">
+          <Icon name="compose" size={13} />
+          <span>
+            {comments.length}{" "}
+            {plural(comments.length, "замечание", "замечания", "замечаний")} к строчкам
+          </span>
+          <span className="inspector__spacer" />
+          <button className="button ghost sm" onClick={() => setComments([])}>
+            Очистить
+          </button>
+          <button
+            className="button primary sm"
+            onClick={() => {
+              onSendReview(buildReviewPrompt(comments));
+              setComments([]);
+            }}
+          >
+            Отправить агенту
+          </button>
+        </div>
+      ) : null}
       {selectedFile ? (
         <div className="diffpane">
           <div className="diffpane__file">
@@ -249,7 +285,13 @@ export function ReviewPane({
               <Icon name="file" size={13} />
             </button>
           </div>
-          <DiffView text={diff} path={selectedFile.path} />
+          <DiffView
+            text={diff}
+            path={selectedFile.path}
+            comments={comments.filter((c) => c.file === selectedFile.path)}
+            onAddComment={(comment) => setComments((prev) => [...prev, comment])}
+            onRemoveComment={(id) => setComments((prev) => prev.filter((c) => c.id !== id))}
+          />
         </div>
       ) : (
         <p className="muted inspector__note">Выберите файл, чтобы посмотреть дифф.</p>
@@ -465,7 +507,20 @@ function parseDiff(text: string): DiffRow[] {
   return rows;
 }
 
-function DiffView({ text, path }: { text: string; path: string }) {
+function DiffView({
+  text,
+  path,
+  comments,
+  onAddComment,
+  onRemoveComment,
+}: {
+  text: string;
+  path: string;
+  /** This file's collected comments (rendered inline under their rows). */
+  comments: DiffComment[];
+  onAddComment: (comment: DiffComment) => void;
+  onRemoveComment: (id: string) => void;
+}) {
   // Per-line syntax highlighting in the file's language; recomputed only when the
   // diff or file changes. Line-by-line coloring is an accepted diff-viewer tradeoff
   // (multi-line constructs may tint imperfectly).
@@ -476,16 +531,107 @@ function DiffView({ text, path }: { text: string; path: string }) {
       html: row.kind === "hunk" ? null : highlight(row.text, lang),
     }));
   }, [text, path]);
+  // The row an inline comment form is open under (index into rows).
+  const [drafting, setDrafting] = useState<number | null>(null);
+  const [draft, setDraft] = useState("");
+  // A new file/diff invalidates row indices — close the form.
+  useEffect(() => {
+    setDrafting(null);
+    setDraft("");
+  }, [text, path]);
+
+  const submitDraft = (row: DiffRow): void => {
+    const remark = draft.trim();
+    if (!remark) return;
+    onAddComment({
+      id: crypto.randomUUID(),
+      file: path,
+      line: row.num,
+      kind: row.kind === "hunk" ? "ctx" : row.kind,
+      code: row.text,
+      text: remark,
+    });
+    setDrafting(null);
+    setDraft("");
+  };
+
+  // Comments anchored to a row: match by line + code (indices drift with edits).
+  const commentsFor = (row: DiffRow): DiffComment[] =>
+    comments.filter((c) => c.line === row.num && c.code === row.text);
+
   return (
     <pre className="diff" aria-label="Дифф файла">
       {rows.map((row, i) => (
-        <div key={i} className={`dl dl--${row.kind}`}>
-          <span className="dl__num">{row.num ?? "⋯"}</span>
-          {row.html != null ? (
-            <span className="dl__text is-code" dangerouslySetInnerHTML={{ __html: row.html || " " }} />
-          ) : (
-            <span className="dl__text">{row.kind === "hunk" ? row.text : row.text || " "}</span>
-          )}
+        <div key={i}>
+          <div className={`dl dl--${row.kind}`}>
+            <span className="dl__num">{row.num ?? "⋯"}</span>
+            {row.kind !== "hunk" ? (
+              <button
+                className="dl__comment"
+                title="Комментарий к строке — уйдёт агенту"
+                aria-label={`Прокомментировать строку ${row.num ?? ""}`}
+                onClick={() => {
+                  setDrafting((d) => (d === i ? null : i));
+                  setDraft("");
+                }}
+              >
+                <Icon name="plus" size={10} />
+              </button>
+            ) : (
+              <span className="dl__comment dl__comment--void" aria-hidden />
+            )}
+            {row.html != null ? (
+              <span className="dl__text is-code" dangerouslySetInnerHTML={{ __html: row.html || " " }} />
+            ) : (
+              <span className="dl__text">{row.kind === "hunk" ? row.text : row.text || " "}</span>
+            )}
+          </div>
+          {commentsFor(row).map((c) => (
+            <div key={c.id} className="dcomment" role="note">
+              <Icon name="compose" size={12} />
+              <span className="dcomment__text">{c.text}</span>
+              <button
+                className="icon-button dcomment__remove"
+                title="Убрать замечание"
+                aria-label="Убрать замечание"
+                onClick={() => onRemoveComment(c.id)}
+              >
+                <Icon name="x" size={11} />
+              </button>
+            </div>
+          ))}
+          {drafting === i ? (
+            <div className="dcomment dcomment--draft">
+              <textarea
+                className="dcomment__field"
+                rows={2}
+                autoFocus
+                placeholder="Что поправить в этой строке?"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    submitDraft(row);
+                  } else if (e.key === "Escape") {
+                    setDrafting(null);
+                  }
+                }}
+              />
+              <div className="dcomment__actions">
+                <button className="button ghost sm" onClick={() => setDrafting(null)}>
+                  Отмена
+                </button>
+                <button
+                  className="button primary sm"
+                  disabled={!draft.trim()}
+                  onClick={() => submitDraft(row)}
+                >
+                  Добавить
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       ))}
     </pre>

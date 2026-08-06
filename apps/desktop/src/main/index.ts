@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { stat, writeFile } from "node:fs/promises";
+import * as os from "node:os";
 import { basename } from "node:path";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, session, shell } from "electron";
 import { join } from "node:path";
@@ -16,6 +17,7 @@ import type {
 } from "../shared/ipc-api";
 import { clearApiKey, getApiKey, setApiKey } from "./credentials";
 import { installCrashHandlers, log, logPath } from "./logger";
+import { buildSupportReport, readTail, reportFilePath } from "./support-report";
 import {
   checkForUpdates,
   downloadUpdate,
@@ -25,6 +27,7 @@ import {
 } from "./updater";
 import {
   fetchAccess,
+  fetchModelStatus,
   generateCommitMessage,
   generateHandoff,
   generatePrText,
@@ -54,11 +57,14 @@ import { ensureUserSkillsPlugin, listUserSkills } from "./user-skills";
 import { scanProjectCommands } from "./project-commands";
 import { isKnownWorkspace, registerWorkspace } from "./workspace-registry";
 import {
+  addWorkspaceGrant,
   clearWorkspaceGrants,
   getWorkspacePrefs,
   grandfatherLegacyWorkspaces,
+  setWorkspaceMemory,
   setWorkspaceTrust,
 } from "./workspace-prefs";
+import { createTaskWorktree, removeTaskWorktree } from "./worktree";
 import * as reviewService from "./review";
 import * as snapshot from "./snapshot-host";
 import * as previewServer from "./preview-server";
@@ -239,6 +245,28 @@ function registerIpc(): void {
   // A support report the user can paste: versions, per-process CPU/memory and the
   // GPU feature matrix. Read-only, main-side — nothing here comes from the page.
   ipcMain.handle("app.perfReport", () => perfReportText());
+  // The one-click support bundle: one text file (versions + load + log tail,
+  // secrets scrubbed), written to userData/reports and revealed in the file
+  // manager. Everything is main-owned — the renderer contributes nothing.
+  ipcMain.handle("app.supportReport", async (): Promise<string> => {
+    const [perfText, logTail] = await Promise.all([
+      perfReportText().catch(() => "(не удалось собрать нагрузку)"),
+      readTail(logPath()),
+    ]);
+    const content = buildSupportReport({
+      appVersion: app.getVersion(),
+      electronVersion: process.versions.electron ?? "?",
+      platform: process.platform,
+      arch: process.arch,
+      osVersion: os.release(),
+      perfText,
+      logTail,
+    });
+    const file = await reportFilePath(app.getPath("userData"));
+    await writeFile(file, content, "utf8");
+    shell.showItemInFolder(file);
+    return file;
+  });
 
   ipcMain.handle("update.status", () => updateStatus());
   ipcMain.handle("update.check", () => checkForUpdates());
@@ -383,6 +411,10 @@ function registerIpc(): void {
     }
   });
 
+  // Public per-model availability for the picker (no auth, cheap, null on any
+  // failure — the picker then simply shows no health marks).
+  ipcMain.handle("wello.modelStatus", () => fetchModelStatus());
+
   ipcMain.handle("wello.clearApiKey", async (): Promise<void> => {
     // Best-effort server-side revoke first: a signed-out machine should hold no
     // live credential. Offline sign-out still clears the keychain.
@@ -435,8 +467,41 @@ function registerIpc(): void {
   ipcMain.handle("workspace.getTrust", (_e, path: string) =>
     typeof path === "string" && allowWorkspace(path)
       ? getWorkspacePrefs(path)
-      : { decided: false, trusted: false, grantedCaps: [] },
+      : { decided: false, trusted: false, grantedCaps: [], memory: "" },
   );
+  // Clear the agent's project notes (the task-menu «Память проекта» action).
+  ipcMain.handle("workspace.clearMemory", (_e, path: string) =>
+    typeof path === "string" && allowWorkspace(path)
+      ? setWorkspaceMemory(path, "")
+      : { ok: false as const, reason: "untrusted" as const },
+  );
+
+  // --- Task worktrees («Новая задача в копии проекта») ----------------------
+  ipcMain.handle("worktree.create", async (_e, originPath: string) => {
+    if (typeof originPath !== "string" || !allowWorkspace(originPath)) {
+      return { ok: false as const, error: "Папка не открыта в приложении." };
+    }
+    const res = await createTaskWorktree(originPath, app.getPath("userData"));
+    if (res.ok) {
+      // The copy is the same code the user already vetted: it enters the
+      // workspace registry and inherits the ORIGIN's trust decision + grants.
+      registerWorkspace(res.path);
+      const prefs = await getWorkspacePrefs(originPath);
+      if (prefs.decided) {
+        await setWorkspaceTrust(res.path, prefs.trusted);
+        for (const cap of prefs.grantedCaps) await addWorkspaceGrant(res.path, cap);
+      }
+    }
+    return res;
+  });
+  ipcMain.handle("worktree.remove", async (_e, originPath: string, worktreePath: string) => {
+    // The task's own folder must be a known workspace; the origin merely names
+    // the repo whose bookkeeping is updated (git verifies it owns the worktree).
+    if (typeof originPath !== "string" || typeof worktreePath !== "string" || !allowWorkspace(worktreePath)) {
+      return { ok: false as const };
+    }
+    return removeTaskWorktree(originPath, worktreePath);
+  });
   ipcMain.handle("workspace.setTrust", (_e, path: string, trusted: boolean) => {
     if (typeof path === "string" && allowWorkspace(path)) {
       return setWorkspaceTrust(path, trusted === true);

@@ -2148,6 +2148,42 @@ body.is-col-resizing {
   max-width: 780px;
   margin: 0 auto;
 }
+/* The strip row: the folder button grows, the worktree chip hangs on its right. */
+.composer__projectrow {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+.composer__projectrow .composer__project {
+  flex: 1;
+  min-width: 0;
+}
+.wtchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  transition: color var(--motion-hover), border-color var(--motion-hover), background var(--motion-hover);
+}
+.wtchip:hover {
+  color: var(--text-primary);
+  background: var(--surface-1);
+}
+.wtchip.is-on {
+  color: var(--accent, var(--text-primary));
+  border-color: color-mix(in srgb, var(--accent, currentColor) 55%, transparent);
+  background: color-mix(in srgb, var(--accent, currentColor) 10%, transparent);
+}
+
 .composer__project {
   display: flex;
   align-items: center;
@@ -2584,6 +2620,35 @@ body.is-col-resizing {
   color: var(--text-secondary);
   font-size: 11px;
 }
+/* A model the gateway reports as down: muted row + amber dot, still clickable
+   (an outage can end any minute — we mark, we don't lock). */
+.modelsel__item.is-down .modelsel__item-label {
+  color: var(--text-secondary);
+}
+.modelsel__item.is-down .modelsel__item-hint {
+  color: var(--warning);
+}
+.modelsel__downdot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 5px 1px 0;
+  border-radius: 999px;
+  background: var(--warning);
+  vertical-align: middle;
+}
+.modelsel__item .modelsel__downdot {
+  margin: 0 0 1px 6px;
+}
+.modelsel__outage {
+  margin: 2px 10px 6px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  color: var(--warning);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
 
 /* Effort slider inside the model menu */
 .effort {
@@ -2958,6 +3023,123 @@ body.is-col-resizing {
   display: flex;
   align-items: stretch;
   border-left: 3px solid transparent;
+}
+/* The per-line comment affordance: invisible until the row is hovered, so the
+   diff stays a diff — but every code line is one click from a remark. */
+.dl__comment {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  flex: none;
+  margin-right: 2px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent, var(--text-secondary));
+  opacity: 0;
+  cursor: pointer;
+}
+.dl:hover .dl__comment,
+.dl__comment:focus-visible {
+  opacity: 1;
+}
+.dl__comment--void {
+  pointer-events: none;
+}
+.dcomment {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 2px 8px 6px 46px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--accent, var(--border-default));
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-family: var(--font-ui, inherit);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: normal;
+}
+.dcomment > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--accent, var(--text-secondary));
+}
+.dcomment__text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.dcomment__remove {
+  flex: none;
+}
+.dcomment--draft {
+  flex-direction: column;
+  align-items: stretch;
+}
+.dcomment__field {
+  width: 100%;
+  resize: vertical;
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font: 12px / 1.5 var(--font-ui, inherit);
+}
+.dcomment__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+/* «копия» badge in the chat header: this task edits an isolated worktree. */
+.chattitle__wt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  margin-left: 2px;
+  padding: 1px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent, currentColor) 45%, transparent);
+  border-radius: 999px;
+  color: var(--accent, var(--text-secondary));
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* The project-memory viewer: the agent's notes verbatim, scrollable. */
+.memoryview {
+  max-height: 320px;
+  overflow: auto;
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font: 12.5px / 1.55 var(--font-code);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* The batch bar above the diff: how many remarks are staged + the send. */
+.reviewbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 12.5px;
+}
+.reviewbar > svg {
+  color: var(--accent, var(--text-secondary));
+  flex: none;
 }
 .dl__num {
   width: 46px;

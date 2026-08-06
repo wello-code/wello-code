@@ -47,6 +47,30 @@ const KNOWN_CONTEXT_WINDOW: Record<string, number> = {
 };
 
 /**
+ * Is a picker model currently served, according to the gateway's public status?
+ *
+ * Id forms differ between the two worlds — the status speaks in catalog ids
+ * with dots («claude-opus-4.8»), the picker in dashed ids («claude-opus-4-8») —
+ * so both sides are normalized before matching.
+ *
+ * Three-valued on purpose: `false` only when the status EXPLICITLY says the
+ * model is down. No status / unknown id → `null`, and the picker marks
+ * nothing — a status hiccup must never read as «все модели лежат».
+ */
+export function modelAvailability(
+  status: Record<string, string> | null | undefined,
+  id: string,
+): boolean | null {
+  if (!status) return null;
+  const norm = (s: string): string => s.toLowerCase().replace(/\./g, "-");
+  const want = norm(id);
+  for (const [key, value] of Object.entries(status)) {
+    if (norm(key) === want) return value === "available";
+  }
+  return null;
+}
+
+/**
  * The window to divide the context gauge by.
  *
  * `reported` is what the engine said, if anything. Ours wins where we have an

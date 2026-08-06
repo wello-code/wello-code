@@ -15,14 +15,15 @@ import {
   type QuestionRequest,
 } from "@wello-code/contracts";
 import { log } from "./logger";
-import { pastesDir } from "./paste-store";
+import { pastesDir, saveImageBuffer } from "./paste-store";
+import { previewConsoleTail, previewViewCapture, previewViewUrl } from "./preview-view";
 import { resolveRunSkills } from "./bundled-skills";
 import * as github from "./github";
 import { publishToGitHub } from "./github-publish";
 import { loadSettings, safeMcpName, splitArgs } from "./settings-store";
 import { resolveUserSkills } from "./user-skills";
 import { readSelfInjectedInstructions } from "./workspace-files";
-import { addWorkspaceGrant, getWorkspacePrefs } from "./workspace-prefs";
+import { addWorkspaceGrant, getWorkspacePrefs, setWorkspaceMemory } from "./workspace-prefs";
 
 export type AgentEventSink = (event: AgentEvent) => void;
 
@@ -157,6 +158,9 @@ export class AgentRuntime {
         workspaceGrants: trusted ? prefs.grantedCaps : [],
         taskGrants: [...(this.taskGrants.get(req.taskId) ?? [])],
         ...(projectInstructions ? { projectInstructions } : {}),
+        // The agent's own notes about the project — same trust gate as every
+        // other project input.
+        ...(trusted && prefs.memory ? { projectMemory: prefs.memory } : {}),
         mcpServers,
         pluginPaths,
         skills,
@@ -240,6 +244,31 @@ export class AgentRuntime {
         // so it works even when the run started before GitHub was connected.
         createGithubRepo: (input) =>
           publishToGitHub(req.workspacePath, { ...input, push: true }),
+        // project_memory: persist the agent's notes. The prefs layer re-checks
+        // trust itself, so a stale/forged call can't write into an untrusted
+        // folder's entry.
+        saveProjectMemory: (content) => setWorkspaceMemory(req.workspacePath, content),
+        // preview_look: snapshot the preview pane for the MODEL. The png lands
+        // in the pastes folder — already whitelisted for reads — so the model's
+        // follow-up Read never needs a permission card.
+        capturePreview: async () => {
+          const png = await previewViewCapture();
+          if (!png) return { ok: false as const, reason: "closed" };
+          try {
+            // saveImageBuffer creates the folder — a fresh profile has no
+            // pastes dir yet, and a bare writeFile there fails with ENOENT.
+            const file = await saveImageBuffer(png, "png", "preview");
+            return {
+              ok: true as const,
+              imagePath: file,
+              pageUrl: previewViewUrl() ?? undefined,
+              console: previewConsoleTail(),
+            };
+          } catch (err) {
+            log.warn(`preview capture failed to save: ${err instanceof Error ? err.message : err}`);
+            return { ok: false as const, reason: "write_failed" };
+          }
+        },
       };
       return callbacks;
     }

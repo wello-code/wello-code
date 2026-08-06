@@ -70,6 +70,8 @@ export interface WorkspaceTrust {
   trusted: boolean;
   /** Capabilities granted with «Разрешить для проекта» (empty when untrusted). */
   grantedCaps: string[];
+  /** The agent's cross-session project notes (empty when none / untrusted). */
+  memory: string;
 }
 
 export interface GitFile {
@@ -475,6 +477,9 @@ export interface WelloApi {
   showLog(): Promise<void>;
   /** Human-readable performance snapshot (versions, per-process CPU/RAM, GPU status). */
   perfReport(): Promise<string>;
+  /** One-click support bundle: writes a single scrubbed report file
+   *  (versions + load + log tail) and reveals it; resolves with its path. */
+  supportReport(): Promise<string>;
   /** Current update state (also pushed via {@link onUpdateStatus}). */
   getUpdateStatus(): Promise<UpdateStatus>;
   /** Ask GitHub Releases whether a newer version exists. */
@@ -512,6 +517,8 @@ export interface WelloApi {
   /** Aborts a pending browser sign-in wait (closes the loopback listener). */
   cancelBrowserSignIn(): Promise<void>;
   getConnection(): Promise<Connection>;
+  /** Public per-model availability (gateway status); null when unreachable. */
+  modelStatus(): Promise<Record<string, string> | null>;
   /** Account-wide "PAYG beyond the plan limit" switch; resolves to fresh status. */
   setPaygOverflow(enabled: boolean): Promise<Connection>;
   clearApiKey(): Promise<void>;
@@ -522,6 +529,14 @@ export interface WelloApi {
   getWorkspaceTrust(path: string): Promise<WorkspaceTrust>;
   /** Record the user's trust decision (revoking also clears every grant). */
   setWorkspaceTrust(path: string, trusted: boolean): Promise<void>;
+  /** Clear the agent's project notes for the folder. */
+  clearWorkspaceMemory(path: string): Promise<{ ok: boolean }>;
+  /** Create a task copy of a git project (linked worktree on a fresh branch). */
+  worktreeCreate(
+    originPath: string,
+  ): Promise<{ ok: true; path: string; branch: string } | { ok: false; error: string }>;
+  /** Remove a task copy; dirty (unsaved work) refuses and leaves the folder. */
+  worktreeRemove(originPath: string, worktreePath: string): Promise<{ ok: boolean; dirty?: boolean }>;
   /** Drop the folder's persisted permission grants. */
   clearWorkspaceGrants(path: string): Promise<void>;
   /** Which project-instruction file the folder carries (CLAUDE.md / AGENTS.md). */

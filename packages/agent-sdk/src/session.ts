@@ -59,6 +59,25 @@ const WEB_SEARCH_TOOL = "web_search";
 export const WEB_SEARCH_TOOL_FQN = `mcp__${ASK_SERVER}__${WEB_SEARCH_TOOL}`;
 
 /**
+ * The preview-pane eye (same in-process server): captures what the app's
+ * built-in browser preview currently shows — a screenshot the model can Read
+ * plus the page's console tail — so the agent verifies its own UI work instead
+ * of asking the user to look.
+ */
+const PREVIEW_LOOK_TOOL = "preview_look";
+export const PREVIEW_LOOK_TOOL_FQN = `mcp__${ASK_SERVER}__${PREVIEW_LOOK_TOOL}`;
+
+/**
+ * Project memory (same in-process server): the agent's own cross-session notes
+ * about THIS project, kept app-side (never written into the user's repo) and
+ * injected into the system prompt of every turn in the folder.
+ */
+const PROJECT_MEMORY_TOOL = "project_memory";
+export const PROJECT_MEMORY_TOOL_FQN = `mcp__${ASK_SERVER}__${PROJECT_MEMORY_TOOL}`;
+/** Keep in sync with the runtime's storage cap (workspace-prefs). */
+export const PROJECT_MEMORY_MAX_CHARS = 8000;
+
+/**
  * The app's GitHub bridge as agent tools (same in-process server): connect via
  * the one-click chat card, and create-repo-and-publish through the stored
  * token. They exist so the model NEVER sends a novice to `gh auth login` or
@@ -260,7 +279,113 @@ export function githubSystemAppend(
   ].join(" ");
 }
 
-const SYSTEM_APPEND = `${ASK_SYSTEM_APPEND}\n\n${SUBAGENT_SYSTEM_APPEND}\n\n${WEB_SEARCH_SYSTEM_APPEND}`;
+/**
+ * Teaches the model to LOOK at its own work. Without this, models edit UI code
+ * and ask the user «проверьте, как выглядит» — while the app has a live preview
+ * pane one tool call away.
+ */
+const PREVIEW_SYSTEM_APPEND = [
+  "The app has a built-in browser preview pane («Превью») the user may keep open",
+  `next to the chat. Call \`${PREVIEW_LOOK_TOOL}\` to capture what it shows RIGHT NOW:`,
+  "it captures a screenshot and returns the page URL plus recent browser-console",
+  "warnings and errors. Follow the tool's own instructions about the screenshot —",
+  "it tells you whether to Read the image file or to work from the console alone.",
+  "After editing UI code, verify the result this way instead of asking the user to",
+  "look; also use it to diagnose «страница не работает» reports. If it says the",
+  "pane is closed, ask the user to open the «Превью» panel, then call it again.",
+].join(" ");
+
+const SYSTEM_APPEND = `${ASK_SYSTEM_APPEND}\n\n${SUBAGENT_SYSTEM_APPEND}\n\n${WEB_SEARCH_SYSTEM_APPEND}\n\n${PREVIEW_SYSTEM_APPEND}`;
+
+/**
+ * The project-memory block of the system prompt: the current notes (when any)
+ * plus the update contract. Whole-text replace keeps the notes self-compacting;
+ * the guidance keeps them NOTES (decisions, conventions, gotchas), not logs.
+ */
+export function projectMemoryAppend(memory: string | undefined): string {
+  const contract = [
+    `Project memory: you can keep short cross-session notes about THIS project via the`,
+    `\`${PROJECT_MEMORY_TOOL}\` tool (it REPLACES the whole note text, ${PROJECT_MEMORY_MAX_CHARS}`,
+    "chars max, stored by the app — never written into the repo). Save durable facts a",
+    "future session would need: key decisions and their why, project conventions, build/",
+    "run gotchas, the user's standing preferences. Do NOT log session narration or",
+    "anything already obvious from the code. Update existing notes instead of piling on;",
+    "drop what became stale. When the user says «запомни …», store it here.",
+  ].join(" ");
+  if (!memory || !memory.trim()) return contract;
+  return `${contract}\n\nYour current project notes (kept from earlier sessions):\n${memory.trim()}`;
+}
+
+/** The outcome shape of the runtime's preview capture (see AgentRunCallbacks). */
+export type PreviewLookOutcome =
+  | { ok: true; imagePath: string; pageUrl?: string; console: string[] }
+  | { ok: false; reason: string };
+
+/**
+ * Can this model receive an IMAGE inside a tool result?
+ *
+ * The GPT family reaches the gateway through an Anthropic→OpenAI bridge that
+ * rejects images in tool results («400 … tool-result-image», caught live while
+ * testing preview_look). The screenshot itself is still taken — the page URL
+ * and the console tail are useful on their own — but telling such a model to
+ * Read the png would end its turn with a raw API error instead of an answer.
+ */
+export function modelReadsToolResultImages(model: string | undefined): boolean {
+  return !/^gpt-/i.test(model ?? "");
+}
+
+/** The plain-text tool result the model reads back from preview_look. */
+export function formatPreviewLook(
+  outcome: PreviewLookOutcome | null,
+  canReadImages = true,
+): {
+  text: string;
+  isError: boolean;
+} {
+  if (!outcome) {
+    return { text: "The preview capture is unavailable in this build.", isError: true };
+  }
+  if (!outcome.ok) {
+    // A failed SAVE is an app problem, not a closed pane — saying «откройте
+    // превью» there would send the user chasing a door that is already open.
+    if (outcome.reason === "write_failed") {
+      return {
+        text:
+          "The preview was captured but the screenshot could not be saved (disk or " +
+          "permissions). Tell the user plainly; do not guess what the page looks like.",
+        isError: true,
+      };
+    }
+    return {
+      text:
+        "The preview pane is not open (or has no page loaded). Ask the user to open " +
+        "the «Превью» panel in the app and load the page there, then call " +
+        `${PREVIEW_LOOK_TOOL} again. Do not guess what the page looks like.`,
+      isError: false,
+    };
+  }
+  const tail = outcome.console.slice(-30);
+  const imageLine = canReadImages
+    ? [
+        `Screenshot of the preview pane saved to: ${outcome.imagePath}`,
+        "Call Read on that exact path to SEE the page (it is an image).",
+      ]
+    : [
+        `A screenshot was saved to ${outcome.imagePath}, but THIS model cannot open`,
+        "images in this environment — do NOT call Read on it (the request would fail).",
+        "Work from the console output below, the page URL and the source files; if",
+        "the visual result genuinely needs eyes, ask the user to look at the pane.",
+      ];
+  return {
+    text: [
+      ...imageLine,
+      ...(outcome.pageUrl ? [`Page URL: ${outcome.pageUrl}`] : []),
+      "Recent browser console (oldest first):",
+      tail.length > 0 ? tail.join("\n") : "(no warnings or errors captured)",
+    ].join("\n"),
+    isError: false,
+  };
+}
 
 /**
  * The «Ультра» mode is the engine's NATIVE ultracode mechanism, switched on via
@@ -469,6 +594,9 @@ export function engineFingerprint(req: SdkRunRequest, conn: WelloConnection): st
     autoCompactWindow: req.autoCompactWindow ?? null,
     github: req.github ?? null,
     instructions: req.projectInstructions ?? null,
+    // Memory rides the system prompt, and the prompt is baked at spawn — a
+    // warmed engine with different notes would answer from a stale prompt.
+    memory: req.projectMemory ?? null,
     resume: req.resumeSessionId ?? null,
     // A fork loads a different history — never reuse an engine across one.
     resumeAt: req.resumeAtMessageUuid ?? null,
@@ -548,6 +676,12 @@ export interface SdkRunRequest {
    */
   projectInstructions?: { file: string; content: string };
   /**
+   * The agent's own cross-session notes about this project (app-side storage,
+   * trusted workspaces only). Injected into the system prompt; updated by the
+   * model through the project_memory tool.
+   */
+  projectMemory?: string;
+  /**
    * GitHub connection status at run start — picks the system-prompt wording
    * (connected: "git push just works"; not: "call github_connect first").
    */
@@ -595,6 +729,11 @@ export interface AgentRunCallbacks {
     private: boolean;
     description?: string;
   }): Promise<GithubPublishOutcome>;
+  /** preview_look: snapshot the app's preview pane for the model (png path +
+   *  page url + console tail); { ok:false } when the pane is closed. */
+  capturePreview?(): Promise<PreviewLookOutcome>;
+  /** project_memory: persist the agent's project notes (trusted folders only). */
+  saveProjectMemory?(content: string): Promise<{ ok: boolean; reason?: string }>;
   /** Optional stderr sink from the Claude Code subprocess (debugging). */
   onLog?(line: string): void;
 }
@@ -800,6 +939,13 @@ export class SdkAgentSession {
       if (toolName === ASK_TOOL_FQN) return { behavior: "allow", updatedInput: input };
       // The connect tool only SHOWS a card — the user decides there; no extra gate.
       if (toolName === GITHUB_CONNECT_TOOL_FQN) return { behavior: "allow", updatedInput: input };
+      // Looking at the app's own preview pane reads nothing of the user's — the
+      // pane is already on their screen. Never worth a card.
+      if (toolName === PREVIEW_LOOK_TOOL_FQN) return { behavior: "allow", updatedInput: input };
+      // Project notes live in APP storage (never the user's repo), only in
+      // folders the user explicitly trusted, and show as a visible timeline
+      // step — a permission card would be pure friction.
+      if (toolName === PROJECT_MEMORY_TOOL_FQN) return { behavior: "allow", updatedInput: input };
       // Plan approval. The ONLY door out of plan mode is this tool (probed live:
       // the engine hard-blocks edits and mutating bash while planning, and
       // consults this callback for ExitPlanMode). It must never be answered by a
@@ -994,6 +1140,68 @@ export class SdkAgentSession {
           },
         ),
         tool(
+          PREVIEW_LOOK_TOOL,
+          "Capture what the app's built-in browser preview pane currently shows: saves a " +
+            "screenshot to a readable file path (Read it to SEE the page) and returns the " +
+            "page URL plus recent browser-console warnings/errors. Use it to verify your own " +
+            "UI changes and to diagnose runtime errors on the page.",
+          {},
+          async () => {
+            const outcome = live.callbacks.capturePreview
+              ? await live.callbacks.capturePreview()
+              : null;
+            const { text, isError } = formatPreviewLook(
+              outcome,
+              modelReadsToolResultImages(live.req.model),
+            );
+            return { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) };
+          },
+        ),
+        tool(
+          PROJECT_MEMORY_TOOL,
+          "Replace your cross-session notes about THIS project (stored by the app, shown to " +
+            "you at the start of every session here). Write the COMPLETE new note text — it " +
+            "replaces what you had. Keep it short and durable: decisions, conventions, " +
+            "gotchas, user preferences.",
+          {
+            content: z
+              .string()
+              .max(PROJECT_MEMORY_MAX_CHARS)
+              .describe(
+                "The full new note text (empty string clears the notes). " +
+                  `Hard cap ${PROJECT_MEMORY_MAX_CHARS} characters — tighten, don't truncate.`,
+              ),
+          },
+          async (args) => {
+            if (!live.callbacks.saveProjectMemory) {
+              return {
+                content: [{ type: "text", text: "Project memory is unavailable in this build." }],
+                isError: true,
+              };
+            }
+            const res = await live.callbacks.saveProjectMemory(String(args.content ?? ""));
+            if (!res.ok) {
+              const text =
+                res.reason === "untrusted"
+                  ? "Project memory is disabled in restricted (untrusted) folders."
+                  : res.reason === "too_long"
+                    ? `The notes exceed ${PROJECT_MEMORY_MAX_CHARS} characters — write a tighter version.`
+                    : "Failed to save the project notes.";
+              return { content: [{ type: "text", text }], isError: true };
+            }
+            return {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    "Project notes saved. They will be in your context from the NEXT turn on " +
+                    "(this turn still carries the previous version).",
+                },
+              ],
+            };
+          },
+        ),
+        tool(
           GITHUB_CONNECT_TOOL,
           "Connect the user's GitHub account to this app: shows a one-click connect card in " +
             "the chat and waits for the user to finish (or decline). Call this when a task " +
@@ -1095,7 +1303,7 @@ export class SdkAgentSession {
     const { engineEffort, thinkingBudget, ultra } = resolveEffort(req.effort);
     // Self-injected project instructions (AGENTS.md): the engine only loads
     // CLAUDE.md natively, so the runtime reads AGENTS.md and appends it here.
-    const baseAppend = `${SYSTEM_APPEND}\n\n${githubSystemAppend(req.github, Boolean(req.gitEnv))}`;
+    const baseAppend = `${SYSTEM_APPEND}\n\n${githubSystemAppend(req.github, Boolean(req.gitEnv))}\n\n${projectMemoryAppend(req.projectMemory)}`;
     const systemAppend = req.projectInstructions
       ? `${baseAppend}\n\nProject instructions from ${req.projectInstructions.file} ` +
         `(checked into this repository):\n${req.projectInstructions.content}`

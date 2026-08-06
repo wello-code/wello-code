@@ -53,6 +53,10 @@ export function summarizeTool(name: string, input: Record<string, unknown>): str
     // Our gateway-backed search tool (the built-in WebSearch is disallowed).
     case "mcp__wello__web_search":
       return `Поиск в интернете: ${str(input.query) ?? ""}`.trim();
+    case "mcp__wello__preview_look":
+      return "Смотрю на превью";
+    case "mcp__wello__project_memory":
+      return "Обновляю память проекта";
     // The app's GitHub bridge tools.
     case "mcp__wello__github_connect":
       return "Подключение GitHub";
@@ -109,6 +113,9 @@ export function toToolIntent(name: string, input: Record<string, unknown>, cwd: 
   switch (name) {
     case "mcp__wello__web_search":
       return { kind: "network_request", host: "api.wello.dev", method: "POST" };
+    case "mcp__wello__preview_look":
+      // The pane frames a local page; "preview" names the surface, not a host.
+      return { kind: "network_request", host: "preview", method: "GET" };
     case "mcp__wello__github_connect":
     case "mcp__wello__github_create_repo":
       return { kind: "network_request", host: "github.com", method: "POST" };

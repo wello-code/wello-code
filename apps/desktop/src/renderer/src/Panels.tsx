@@ -74,6 +74,7 @@ export function PanelDock({
   onResize,
   onResizeEnd,
   onRepoChanged,
+  onSendReview,
 }: {
   panels: PanelId[];
   maximized: PanelId | null;
@@ -93,6 +94,8 @@ export function PanelDock({
   onResizeEnd: (width: number) => void;
   /** The repo state changed under the review pane (init / commit) — refresh the chip/card. */
   onRepoChanged: () => void;
+  /** Review-pane line comments → one follow-up turn to the agent. */
+  onSendReview: (prompt: string) => void;
 }) {
   const hostRef = useRef<HTMLElement>(null);
   // The dock is measured, not trusted: the CSS width is clamped by the viewport
@@ -330,6 +333,7 @@ export function PanelDock({
                   model={model}
                   onOpenFile={onOpenFile}
                   onRepoChanged={onRepoChanged}
+                  onSendReview={onSendReview}
                 />
               ) : id === "agents" ? (
                 <AgentsPanel subagents={subagents} />

@@ -35,6 +35,8 @@ export interface TaskItem {
   /** Workspace this chat is bound to (chosen at creation; each chat has its own). */
   workspacePath: string | null;
   workspaceName?: string | null;
+  /** Set when the chat runs in an isolated project copy (git worktree). */
+  worktree?: { origin: string; branch: string } | null;
   /** Pinned chats sort to the top of the sidebar. */
   pinned?: boolean;
   /** Last user activity (create/follow-up) — drives the date groups in the sidebar. */
@@ -62,6 +64,7 @@ export type TasksAction =
       runId: string;
       workspacePath: string;
       workspaceName: string;
+      worktree?: { origin: string; branch: string };
     } & UserTurnPayload)
   | ({
       type: "followup";
@@ -102,6 +105,7 @@ export function tasksReducer(state: TasksState, action: TasksAction): TasksState
         sessionId: null,
         workspacePath: action.workspacePath,
         workspaceName: action.workspaceName,
+        ...(action.worktree ? { worktree: action.worktree } : {}),
         pinned: false,
         updatedAt: new Date().toISOString(),
         cancelledRunId: null,
