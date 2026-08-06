@@ -70,6 +70,16 @@ describe("engineModelId", () => {
     expect(engineModelId("claude-sonnet-4.6")).toBe("claude-sonnet-4.6");
     expect(engineModelId("some-future-model")).toBe("some-future-model");
   });
+
+  it("sends the GPT family clean: it holds 400K, not 1M", () => {
+    // The "[1m]" variant is an engine-internal name for ITS table of Anthropic
+    // models. Handing it a GPT id would either be ignored or, worse, understood
+    // as a 1M window the model does not have. Their window is set on our side
+    // (renderer/models.ts), which is where the ring reads it.
+    for (const id of ["gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna"]) {
+      expect(engineModelId(id)).toBe(id);
+    }
+  });
 });
 
 describe("runSettings (auto-compaction budget)", () => {
