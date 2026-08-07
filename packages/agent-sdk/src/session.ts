@@ -115,6 +115,21 @@ export function isSafeEngineTool(name: string): boolean {
 }
 
 /**
+ * The engine's own explanation of a refusal, made fit to show a person — or
+ * `null` when it is not.
+ *
+ * Two things are wrong with it as-is. It names ITSELF («…because Claude Code is
+ * running in don't ask mode»), while the only product the user has is this app.
+ * And most of it is written FOR THE MODEL — a paragraph of instructions about
+ * trying other tools — which is noise in a timeline. So: rename the engine to
+ * this app, and keep only a short, human-sized sentence.
+ */
+export function engineReasonForUser(text: string | undefined): string | null {
+  const clean = (text ?? "").replace(/claude code/gi, "Wello Code").trim();
+  return clean && clean.length <= 160 ? clean : null;
+}
+
+/**
  * The plan-approval card for a run in `mode` — or `null` when leaving plan mode
  * must NOT be asked about.
  *
@@ -1562,15 +1577,11 @@ export class SdkAgentSession {
             message?: string;
           };
           const toolName = d.tool_name ?? "";
-          // The engine's `message` is written FOR THE MODEL ("you may try another
-          // tool, but do not work around this maliciously…") — probed live in
-          // don't-ask mode. Only a short, human-sized note is worth repeating to
-          // the user; the long instruction is not.
-          const engineNote = d.decision_reason ?? d.message ?? "";
+          const reason = engineReasonForUser(d.decision_reason ?? d.message);
           emit("permission.auto_denied", {
             summary: toolName ? summarizeTool(toolName, {}) : "Действие агента",
             ...(d.decision_reason_type ? { source: d.decision_reason_type } : {}),
-            ...(engineNote && engineNote.length <= 160 ? { reason: engineNote } : {}),
+            ...(reason ? { reason } : {}),
           });
           if (d.tool_use_id) emit("tool.updated", { id: d.tool_use_id, status: "denied" });
         } else if (sys.subtype === "task_notification") {

@@ -6,6 +6,7 @@ import {
   engineFingerprint,
   engineModelId,
   formatPreviewLook,
+  engineReasonForUser,
   isSafeEngineTool,
   modelReadsToolResultImages,
   planApprovalCard,
@@ -83,6 +84,27 @@ describe("planApprovalCard (leaving plan mode)", () => {
       expect(card?.reason).toContain("сам");
       expect(card?.impact[0]).not.toContain("«План»");
     }
+  });
+});
+
+describe("engineReasonForUser (a refusal, in words fit for a person)", () => {
+  it("renames the engine to this app — the user has no other product here", () => {
+    expect(engineReasonForUser("Denied because Claude Code is running in don't ask mode")).toBe(
+      "Denied because Wello Code is running in don't ask mode",
+    );
+  });
+
+  it("drops the long instruction the engine writes FOR THE MODEL", () => {
+    const forTheModel =
+      "Permission to use Read has been denied because the mode forbids it. IMPORTANT: You *may* " +
+      "attempt to accomplish this action using other tools that might naturally be used to " +
+      "accomplish this goal, e.g. using head instead of cat. But you *should not* work around it.";
+    expect(engineReasonForUser(forTheModel)).toBeNull();
+  });
+
+  it("has nothing to say when the engine said nothing", () => {
+    expect(engineReasonForUser(undefined)).toBeNull();
+    expect(engineReasonForUser("   ")).toBeNull();
   });
 });
 
