@@ -8,7 +8,6 @@ import {
   formatPreviewLook,
   engineReasonForUser,
   isSafeEngineTool,
-  modelReadsToolResultImages,
   planApprovalCard,
   projectMemoryAppend,
   githubSystemAppend,
@@ -328,6 +327,25 @@ describe("workflow.progress event contract", () => {
 });
 
 describe("contextTokensFromUsage", () => {
+  it("reads the shape the engine reports at the END of a turn", () => {
+    // Where the gauge's number now comes from. On the GPT family the per-message
+    // usage streamed mid-turn is all zeros — the real numbers arrive only with
+    // the turn's result — so the ring never appeared at all (reported 2026-08-07).
+    expect(
+      contextTokensFromUsage({
+        input_tokens: 3774,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 26112,
+        output_tokens: 6,
+        server_tool_use: { web_search_requests: 0 },
+        service_tier: "standard",
+        cache_creation: { ephemeral_5m_input_tokens: 0 },
+      }),
+    ).toBe(29892);
+    // All zeros is «nothing reported», not «an empty context».
+    expect(contextTokensFromUsage({ input_tokens: 0, output_tokens: 0 })).toBeNull();
+  });
+
   it("sums fresh input, cache reads/writes and the answer", () => {
     expect(
       contextTokensFromUsage({
@@ -543,30 +561,20 @@ describe("formatPreviewLook (the preview_look tool result)", () => {
     expect(text).toContain("Uncaught TypeError: boom");
   });
 
-  it("a model that cannot take images in tool results is told NOT to Read it", () => {
-    // Caught live: the GPT family reaches the gateway through a bridge that
-    // rejects images inside tool results, so a Read there ends the turn with
-    // «400 … tool-result-image» instead of an answer. The console still helps.
-    const { text } = formatPreviewLook(
-      {
-        ok: true,
-        imagePath: "C:/ud/pastes/preview-1.png",
-        pageUrl: "http://127.0.0.1:5173/",
-        console: ["[error] boom"],
-      },
-      false,
-    );
-    expect(text).toContain("do NOT call Read");
+  it("every model is told to Read the screenshot — the bridge carries it now", () => {
+    // The GPT family used to be told NOT to: their bridge refused an image inside
+    // a tool result and the turn died with «400 … tool-result-image». The gateway
+    // now carries such an image into the next user message, so one instruction
+    // serves every model again.
+    const { text } = formatPreviewLook({
+      ok: true,
+      imagePath: "C:/ud/pastes/preview-1.png",
+      pageUrl: "http://127.0.0.1:5173/",
+      console: ["[error] boom"],
+    });
+    expect(text).toContain("Call Read on that exact path");
+    expect(text).not.toContain("do NOT call Read");
     expect(text).toContain("boom");
-    expect(text).toContain("http://127.0.0.1:5173/");
-  });
-
-  it("knows which families can take an image in a tool result", () => {
-    expect(modelReadsToolResultImages("claude-sonnet-5")).toBe(true);
-    expect(modelReadsToolResultImages("claude-opus-5")).toBe(true);
-    expect(modelReadsToolResultImages(undefined)).toBe(true); // default: engine's own
-    expect(modelReadsToolResultImages("gpt-5.6-terra")).toBe(false);
-    expect(modelReadsToolResultImages("gpt-5.6-sol")).toBe(false);
   });
 
   it("a closed pane instructs the model to involve the user, not to guess", () => {

@@ -380,24 +380,8 @@ export type PreviewLookOutcome =
   | { ok: true; imagePath: string; pageUrl?: string; console: string[] }
   | { ok: false; reason: string };
 
-/**
- * Can this model receive an IMAGE inside a tool result?
- *
- * The GPT family reaches the gateway through an Anthropic→OpenAI bridge that
- * rejects images in tool results («400 … tool-result-image», caught live while
- * testing preview_look). The screenshot itself is still taken — the page URL
- * and the console tail are useful on their own — but telling such a model to
- * Read the png would end its turn with a raw API error instead of an answer.
- */
-export function modelReadsToolResultImages(model: string | undefined): boolean {
-  return !/^gpt-/i.test(model ?? "");
-}
-
 /** The plain-text tool result the model reads back from preview_look. */
-export function formatPreviewLook(
-  outcome: PreviewLookOutcome | null,
-  canReadImages = true,
-): {
+export function formatPreviewLook(outcome: PreviewLookOutcome | null): {
   text: string;
   isError: boolean;
 } {
@@ -424,17 +408,14 @@ export function formatPreviewLook(
     };
   }
   const tail = outcome.console.slice(-30);
-  const imageLine = canReadImages
-    ? [
-        `Screenshot of the preview pane saved to: ${outcome.imagePath}`,
-        "Call Read on that exact path to SEE the page (it is an image).",
-      ]
-    : [
-        `A screenshot was saved to ${outcome.imagePath}, but THIS model cannot open`,
-        "images in this environment — do NOT call Read on it (the request would fail).",
-        "Work from the console output below, the page URL and the source files; if",
-        "the visual result genuinely needs eyes, ask the user to look at the pane.",
-      ];
+  // Every model we serve can open the screenshot now. The GPT family used to be
+  // told NOT to (their bridge refused an image inside a tool result and the turn
+  // died with a raw 400); the gateway carries such an image into the next user
+  // message instead, so the instruction is the same for everyone again.
+  const imageLine = [
+    `Screenshot of the preview pane saved to: ${outcome.imagePath}`,
+    "Call Read on that exact path to SEE the page (it is an image).",
+  ];
   return {
     text: [
       ...imageLine,
@@ -1219,10 +1200,7 @@ export class SdkAgentSession {
             const outcome = live.callbacks.capturePreview
               ? await live.callbacks.capturePreview()
               : null;
-            const { text, isError } = formatPreviewLook(
-              outcome,
-              modelReadsToolResultImages(live.req.model),
-            );
+            const { text, isError } = formatPreviewLook(outcome);
             return { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) };
           },
         ),
@@ -1782,6 +1760,15 @@ export class SdkAgentSession {
             : [];
           mapState.result = { ok: false, code: [msg.subtype, ...texts].join(" — ") };
         }
+        // How full the window is after this turn. The per-message usage we read
+        // during the stream is the FIRST frame's, and on the GPT family that
+        // frame carries zeros — their usage only arrives with the last frame of
+        // the turn, so the gauge had nothing to show and simply did not appear
+        // (reported 2026-08-07). The result's usage is that final number, in the
+        // same four-leg shape, and it is per-turn rather than cumulative —
+        // probed live across two turns of one session.
+        const resultUsed = contextTokensFromUsage((msg as { usage?: unknown }).usage);
+        if (resultUsed != null) emit("run.context", { usedTokens: resultUsed });
         const modelUsage = (msg as { modelUsage?: Record<string, { contextWindow?: number }> })
           .modelUsage;
         const windowTokens = Object.values(modelUsage ?? {}).reduce(
