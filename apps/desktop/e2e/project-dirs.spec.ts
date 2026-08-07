@@ -104,6 +104,12 @@ test("the agent actually reaches an attached folder, and «Полный дост
     await page.locator(".composer__project").click();
     await page.getByRole("button", { name: "Доверяю папке" }).click();
 
+    // A GPT model on purpose: it is the family where the plan card and the
+    // attached folder both first went wrong, and it does not depend on the
+    // Claude family being up.
+    await page.getByRole("button", { name: /Sonnet 5|Opus|Fable|GPT/ }).first().click();
+    await page.getByRole("option", { name: /GPT Terra/ }).click();
+
     // «Полный доступ»: the mode that promises never to ask anything.
     await page.getByRole("button", { name: "Вручную" }).click();
     await page.getByRole("option", { name: /Полный доступ/ }).click();
@@ -120,7 +126,11 @@ test("the agent actually reaches an attached folder, and «Полный дост
 
     // One turn that has to (a) plan and leave plan mode, (b) read a file that
     // only exists in the attached folder. A permission card in bypass mode is
-    // the bug this test exists for.
+    // the bug this test exists for. The greeting turn has to settle first, or
+    // this message would queue behind it.
+    await expect(page.getByRole("button", { name: "Остановить" })).toHaveCount(0, {
+      timeout: 60_000,
+    });
     await page
       .getByPlaceholder(/Запросите|Спросите/)
       .first()
