@@ -15,7 +15,16 @@ import {
   setWorkspaceTrust,
 } from "./workspace-prefs";
 
-afterAll(() => rmSync(userData, { recursive: true, force: true }));
+afterAll(() => {
+  // The prefs file is written by a background queue, so on Windows the last
+  // write can still hold the handle when the suite ends. Cleanup failing must
+  // not fail the run.
+  try {
+    rmSync(userData, { recursive: true, force: true });
+  } catch {
+    /* a temp dir the OS will collect anyway */
+  }
+});
 beforeEach(() => resetWorkspacePrefsForTests());
 
 describe("extra project folders (working across two repositories)", () => {

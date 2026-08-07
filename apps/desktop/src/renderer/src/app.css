@@ -2178,8 +2178,42 @@ body.is-col-resizing {
   color: var(--text-primary);
   background: var(--surface-1);
 }
+/* «Ещё папки» is the RIGHT HALF of the composer's project header, not a pill
+   parked next to it: same surface, same hairline, only the outer corner
+   rounded, so the two read as one strip (a lone pill there looked pasted on). */
+.projectdirs {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  padding: 9px 14px 22px;
+  margin-bottom: -13px;
+  border: 1px solid var(--border-subtle);
+  border-left: none;
+  border-bottom: none;
+  border-radius: 0 var(--radius-lg) 0 0;
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  transition:
+    background var(--motion-hover),
+    color var(--motion-hover);
+}
+.projectdirs:hover {
+  background: var(--surface-1);
+  color: var(--text-primary);
+}
+/* The project card gives up its right corner (and the gap) to its new neighbour. */
+.composer__projectrow:has(.projectdirs) {
+  gap: 0;
+}
+.composer__projectrow:has(.projectdirs) .composer__project {
+  border-right: none;
+  border-radius: var(--radius-lg) 0 0 0;
+}
 /* How many folders are attached beyond the project itself. */
-.wtchip__count {
+.projectdirs__count {
   color: var(--accent, var(--text-primary));
   font: 11px / 1 var(--font-code);
 }

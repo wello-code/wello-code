@@ -576,7 +576,14 @@ async function changedFiles(cwd: string, manifest: SnapshotManifest): Promise<Ch
     }
     const info = await stat(real).catch(() => null);
     if (!info || !info.isFile()) return null;
-    if (!base) return { kind: "added", rel };
+    // Absent from the baseline usually means the agent created it. On a PARTIAL
+    // baseline it means nothing of the sort: the capture stopped at a cap (file
+    // size, total bytes, file count, time) and the file may have been sitting
+    // there all along. Calling those «added» filled the review pane with the
+    // user's own files — reported 2026-08-07 on a big folder, «изменено 6
+    // файлов, +138475» after a turn that changed nothing — and «Отменить» would
+    // have DELETED them. Silence is the honest answer here.
+    if (!base) return manifest.partial ? null : { kind: "added", rel };
     // Unchanged fast-path: same size AND mtime → skip the hash.
     if (info.size === base.size && info.mtimeMs === base.mtimeMs) return null;
     return { kind: "suspect", rel, real, base };
@@ -653,6 +660,9 @@ export async function snapshotRevertFile(taskId: string, cwd: string, rel: strin
   const abs = assertInside(cwd, rel);
   const base = manifest.files[rel];
   if (!base) {
+    // A partial baseline cannot prove the file is new (see changedFiles), and a
+    // delete is not undoable — refuse rather than risk the user's own file.
+    if (manifest.partial) return;
     // Added since baseline — remove it (guard the delete target too).
     const real = await realInside(cwd, abs);
     if (real) await rm(real, { force: true });

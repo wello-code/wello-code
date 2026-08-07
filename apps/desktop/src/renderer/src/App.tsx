@@ -3196,14 +3196,14 @@ ${t.workspaceName}` : t.title
                   // where nobody looked for it — the question «а где добавить ещё
                   // папку?» comes up while PICKING the project, so the door is here.
                   <button
-                    className="wtchip"
+                    className="projectdirs"
                     title="Дать агенту доступ к другим папкам, например ко второму репозиторию"
                     onClick={() => setDirsView(true)}
                   >
-                    <Icon name="folder" size={12} />
+                    <Icon name="folder" size={13} />
                     ещё папки
                     {wsTrust?.extraDirs.length ? (
-                      <span className="wtchip__count">+{wsTrust.extraDirs.length}</span>
+                      <span className="projectdirs__count">+{wsTrust.extraDirs.length}</span>
                     ) : null}
                   </button>
                 ) : null}

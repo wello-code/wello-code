@@ -348,3 +348,54 @@ describe("checkpoints (rewind)", () => {
     expect(await exists(join(ws, "big.bin"))).toBe(true); // the user's large file survives
   });
 });
+
+describe("a baseline that could not capture everything", () => {
+  /** A file over the per-file ceiling is skipped at capture, which makes the
+   *  whole baseline partial — the exact shape of the report: a folder with a
+   *  handful of big PDFs. */
+  async function workspaceWithBigFile(): Promise<string> {
+    const ws = await newWorkspace();
+    await writeFile(join(ws, "notes.md"), "small file\n");
+    await writeFile(join(ws, "big.bin"), Buffer.alloc(3 * 1024 * 1024, 7)); // > 2 MB cap
+    return ws;
+  }
+
+  it("does not blame the user's own files on the agent", async () => {
+    const ws = await workspaceWithBigFile();
+    await ensureBaseline("partial-1", ws);
+    // Nothing touched the folder since the baseline.
+    const sum = await snapshotSummary("partial-1", ws);
+    expect(sum.files).toEqual([]);
+    expect(sum.additions).toBe(0);
+  });
+
+  it("still reports what the agent really changed", async () => {
+    const ws = await workspaceWithBigFile();
+    await ensureBaseline("partial-2", ws);
+    await writeFile(join(ws, "notes.md"), "small file\nedited by the agent\n");
+    const sum = await snapshotSummary("partial-2", ws);
+    expect(sum.files.map((f) => f.path)).toEqual(["notes.md"]);
+    expect(sum.files[0]!.status).toBe("modified");
+  });
+
+  it("REFUSES to delete a file it cannot prove is new", async () => {
+    // «Отменить» on a falsely-added file used to remove the user's own data.
+    const ws = await workspaceWithBigFile();
+    await ensureBaseline("partial-3", ws);
+    await snapshotRevertFile("partial-3", ws, "big.bin");
+    expect(await exists(join(ws, "big.bin"))).toBe(true);
+    await snapshotRevertAll("partial-3", ws);
+    expect(await exists(join(ws, "big.bin"))).toBe(true);
+  });
+
+  it("a COMPLETE baseline still calls a new file added — and revert removes it", async () => {
+    const ws = await newWorkspace();
+    await writeFile(join(ws, "a.txt"), "one\n");
+    await ensureBaseline("full-1", ws);
+    await writeFile(join(ws, "b.txt"), "made by the agent\n");
+    const sum = await snapshotSummary("full-1", ws);
+    expect(sum.files.map((f) => `${f.status} ${f.path}`)).toEqual(["added b.txt"]);
+    await snapshotRevertFile("full-1", ws, "b.txt");
+    expect(await exists(join(ws, "b.txt"))).toBe(false);
+  });
+});

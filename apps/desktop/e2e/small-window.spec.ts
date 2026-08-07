@@ -87,7 +87,7 @@ test("«ещё папки» is reachable from the project row, before any chat e
     await expect(page.locator(".dirlist__row:not(.is-root)")).toHaveCount(1, { timeout: 10_000 });
     await page.locator(".modal__actions button", { hasText: "Закрыть" }).click();
     // The chip counts what is attached, so the state is visible without opening it.
-    await expect(page.locator(".wtchip__count")).toHaveText("+1");
+    await expect(page.locator(".projectdirs__count")).toHaveText("+1");
   } finally {
     await closeApp(app);
     await rm(ws, { recursive: true, force: true });
