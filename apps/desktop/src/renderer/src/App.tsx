@@ -3191,6 +3191,22 @@ ${t.workspaceName}` : t.title
                   <span className="composer__project-name">{workspace ? workspace.name : "Выбрать проект"}</span>
                   {workspace ? <span className="composer__project-path">{workspace.path}</span> : null}
                 </button>
+                {workspace ? (
+                  // Attaching a second folder used to live only in the chat menu,
+                  // where nobody looked for it — the question «а где добавить ещё
+                  // папку?» comes up while PICKING the project, so the door is here.
+                  <button
+                    className="wtchip"
+                    title="Дать агенту доступ к другим папкам, например ко второму репозиторию"
+                    onClick={() => setDirsView(true)}
+                  >
+                    <Icon name="folder" size={12} />
+                    ещё папки
+                    {wsTrust?.extraDirs.length ? (
+                      <span className="wtchip__count">+{wsTrust.extraDirs.length}</span>
+                    ) : null}
+                  </button>
+                ) : null}
                 {workspace && branch?.isRepo && !branch.unborn ? (
                   <button
                     className={`wtchip ${wtNew ? "is-on" : ""}`}
@@ -5716,6 +5732,25 @@ const BranchChip = forwardRef<
 
 /** Shared close-on-outside-click/Escape behavior for the composer drop-up menus. */
 function useDropUp(open: boolean, close: () => void, rootRef: React.RefObject<HTMLDivElement | null>) {
+  // These menus grow upward from their button, and nothing bounded them: in a
+  // short window the model list ran off the TOP of the screen and its first
+  // entries could not be reached (reported 2026-08-07 with a screenshot). The
+  // window's own height is not the answer — the composer can sit mid-screen —
+  // so the ceiling is the space above the button itself.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const root = rootRef.current;
+    const menu = root?.querySelector<HTMLElement>(".modelsel__menu");
+    if (!root || !menu) return;
+    const apply = (): void => {
+      const room = root.getBoundingClientRect().top - 16;
+      menu.style.maxHeight = `${Math.max(160, room)}px`;
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    return () => window.removeEventListener("resize", apply);
+  }, [open, rootRef]);
+
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent): void => {

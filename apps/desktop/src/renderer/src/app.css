@@ -2178,6 +2178,11 @@ body.is-col-resizing {
   color: var(--text-primary);
   background: var(--surface-1);
 }
+/* How many folders are attached beyond the project itself. */
+.wtchip__count {
+  color: var(--accent, var(--text-primary));
+  font: 11px / 1 var(--font-code);
+}
 .wtchip.is-on {
   color: var(--accent, var(--text-primary));
   border-color: color-mix(in srgb, var(--accent, currentColor) 55%, transparent);
@@ -2422,6 +2427,11 @@ body.is-col-resizing {
   bottom: calc(100% + 6px);
   z-index: var(--z-overlay);
   min-width: 240px;
+  /* The ceiling itself is set per-open from the space above the button (see
+     useDropUp) — the window's height is not enough, because the composer can
+     sit mid-screen. Here we only make the capped menu scrollable. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 5px;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
