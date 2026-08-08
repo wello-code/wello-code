@@ -440,7 +440,12 @@ const PERM_MODES: { id: TaskMode; label: string; hint: string; warn?: boolean }[
   { id: "manual", label: "Вручную", hint: "Спрашивать разрешение на действия" },
   { id: "acceptEdits", label: "Принимать правки", hint: "Правки файлов — без вопросов" },
   { id: "plan", label: "План", hint: "Только план, без выполнения" },
-  { id: "auto", label: "Авто", hint: "Модель сама решает, когда спросить" },
+  // NOT «модель сама решает, когда спросить»: the decision belongs to the
+  // engine's own judge, it is not the model, and it does not ask — it allows or
+  // refuses. When it cannot reach a verdict it refuses, and a person who was
+  // promised «спросит» reads that as the app breaking (reported 2026-08-08:
+  // «модели теперь просят меня git commit сделать»).
+  { id: "auto", label: "Авто", hint: "Решает встроенный судья: простое пропускает, спорное отклоняет" },
   // The id stays "bypass" (stored in localStorage/engine mapping) — only the
   // visible wording changed, so saved selections survive the rename.
   { id: "bypass", label: "Полный доступ", hint: "Действует без подтверждений. Рискованно", warn: true },
