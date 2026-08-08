@@ -501,8 +501,17 @@ function applyEvent(prev: AgentState, event: AgentEvent): AgentState {
     }
     case "permission.requested":
       return { ...state, pending: event.data };
-    case "permission.auto_denied":
-      return { ...state, items: [...state.items, note(event.id, autoDenialText(event.data), "danger")] };
+    case "permission.auto_denied": {
+      // Once per run, not once per call. When the «Авто» judge cannot evaluate an
+      // action it refuses EVERY one of them, and the text repeats verbatim (the
+      // summary names the kind of action, not its arguments). A column of
+      // identical red notes is what «всё падает» looks like from a chair, and it
+      // buries the one sentence that says how to get out of it. Each refused step
+      // is still marked denied on its own tool row, so nothing is hidden.
+      const text = autoDenialText(event.data);
+      if (saidSinceLastTurn(state.items, text)) return state;
+      return { ...state, items: [...state.items, note(event.id, text, "danger")] };
+    }
     case "question.requested":
       return { ...state, question: event.data };
     case "github.connect_requested":
@@ -555,6 +564,23 @@ function note(id: string, text: string, tone: "info" | "success" | "danger" | "c
 }
 
 /**
+ * Has this exact note already been shown for the CURRENT request?
+ *
+ * The timeline is the whole conversation, so «have we said this» has to stop at
+ * the last thing the person sent. Scoped to the turn on purpose: repeating a
+ * refusal ten times inside one turn is noise, but staying silent about it on the
+ * NEXT turn would take us back to a run that seems to do nothing at all.
+ */
+function saidSinceLastTurn(items: readonly TimelineItem[], text: string): boolean {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]!;
+    if (item.kind === "user") return false;
+    if (item.kind === "note" && item.text === text) return true;
+  }
+  return false;
+}
+
+/**
  * The note for a refusal the engine made without asking us. It has to answer
  * three things at once: what was refused, who refused it, and what the user can
  * do about it — otherwise the only trace left is the model's own confused
@@ -565,6 +591,20 @@ export function autoDenialText(data: {
   source?: string;
   reason?: string;
 }): string {
+  // «Could not evaluate» is not a refusal of THIS action: the mode's judge cannot
+  // reach a verdict at all, so it will block every step until the person changes
+  // mode. Measured 2026-08-08: it answers for one model and refuses everything for
+  // another, on the same machine and the same command — which is why this reads to
+  // people as «все агенты падают при вызове Bash». Naming the mode as the problem
+  // is the difference between a dead-end and a next move. The engine's own advice
+  // («run with --debug») is dropped: there is no command line here to run it on.
+  if (/could not evaluate/i.test(data.reason ?? "")) {
+    return (
+      `Режим «Авто» не смог оценить действие и отклонил его: ${data.summary}. ` +
+      "Его встроенный судья сейчас не выносит решений, поэтому так будет с каждым шагом. " +
+      "Выберите «Вручную», чтобы решать самому, или «Полный доступ», чтобы не спрашивать."
+    );
+  }
   const head = `Действие отклонено автоматически: ${data.summary}`;
   const why = data.reason?.trim() ? ` — ${data.reason.trim()}` : "";
   // Who refused decides what advice makes sense. 'classifier' is the «Авто»

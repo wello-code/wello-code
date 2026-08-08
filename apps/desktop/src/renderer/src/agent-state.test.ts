@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentEvent } from "@wello-code/contracts";
 import {
   agentReducer,
+  autoDenialText,
   describeCurrentAction,
   initialAgentState,
   type AgentState,
@@ -433,5 +434,76 @@ describe("agentReducer · refusals the engine made on its own", () => {
     const text = last.kind === "note" ? last.text : "";
     expect(text).toContain("Запуск команды");
     expect(text).not.toContain("«Авто»");
+  });
+});
+
+describe("agentReducer · permission.auto_denied (a judge that refuses everything)", () => {
+  const denial = (summary: string, reason: string) =>
+    ev("permission.auto_denied", { summary, source: "classifier", reason });
+
+  it("says it once per run instead of once per refused call", () => {
+    // The «Авто» judge that cannot evaluate refuses every command, with the same
+    // words each time: reported as «все агенты падают при вызове Bash», because a
+    // column of identical red notes reads as the app breaking down.
+    const s = apply(
+      initialAgentState,
+      denial("Run a command", "Auto mode could not evaluate this action"),
+      denial("Run a command", "Auto mode could not evaluate this action"),
+      denial("Run a command", "Auto mode could not evaluate this action"),
+    );
+    const notes = s.items.filter((i) => i.kind === "note");
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ tone: "danger" });
+  });
+
+  it("still reports a genuinely different refusal", () => {
+    const s = apply(
+      initialAgentState,
+      denial("Run a command", "Auto mode could not evaluate this action"),
+      denial("Изменит файл app.ts", "sensitive path"),
+    );
+    expect(s.items.filter((i) => i.kind === "note")).toHaveLength(2);
+  });
+});
+
+describe("autoDenialText · a judge that cannot reach a verdict", () => {
+  it("blames the mode, not the action, and drops advice about a command line", () => {
+    const text = autoDenialText({
+      summary: "Run a command",
+      source: "classifier",
+      reason: "Auto mode could not evaluate this action and is blocking it for safety — run with --debug for details",
+    });
+    expect(text).toContain("Режим «Авто» не смог оценить действие");
+    expect(text).toMatch(/каждым шагом/); // it will not be a one-off
+    expect(text).toMatch(/Вручную/);
+    expect(text).not.toMatch(/--debug/);
+  });
+
+  it("leaves a real refusal with its own reason intact", () => {
+    const text = autoDenialText({
+      summary: "Изменит файл .env",
+      source: "classifier",
+      reason: "sensitive file",
+    });
+    expect(text).toContain("Изменит файл .env");
+    expect(text).toContain("sensitive file");
+  });
+});
+
+describe("agentReducer · auto-denial is scoped to the turn", () => {
+  it("says it again on the NEXT request, not only once per chat", () => {
+    // The timeline is the whole conversation. Deduping against all of it would
+    // leave a later turn showing nothing at all, which is the very silence the
+    // note exists to break.
+    const denial = ev("permission.auto_denied", {
+      summary: "Run a command",
+      source: "classifier",
+      reason: "Auto mode could not evaluate this action",
+    });
+    let s = apply(initialAgentState, denial, denial);
+    expect(s.items.filter((i) => i.kind === "note")).toHaveLength(1);
+    s = agentReducer(s, { type: "followup", prompt: "ещё раз" });
+    s = apply(s, denial);
+    expect(s.items.filter((i) => i.kind === "note")).toHaveLength(2);
   });
 });
