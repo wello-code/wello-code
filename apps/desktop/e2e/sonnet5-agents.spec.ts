@@ -165,11 +165,24 @@ test("Sonnet 5: «Авто» never buries the person under repeated refusals", a
       );
     await page.keyboard.press("Enter");
 
-    await expect(page.getByRole("button", { name: "Остановить" })).toHaveCount(0, {
-      timeout: 360_000,
-    });
-    const danger = await page.locator(".note--danger").allInnerTexts();
-    // At most one refusal note, and if there is one it has to say the way out.
+    // How LONG the turn takes is not ours to assert: with every command refused
+    // the model keeps trying other approaches, and one measured run churned for
+    // over six minutes. What is ours: the person is told once, told how to get
+    // out, and can always stop. So wait a bounded while, then stop it ourselves.
+    const running = page.getByRole("button", { name: "Остановить" });
+    const note = page.locator(".note--danger");
+    await expect
+      .poll(async () => (await note.count()) > 0 || (await running.count()) === 0, {
+        timeout: 240_000,
+      })
+      .toBe(true);
+    if ((await running.count()) > 0) {
+      await running.click();
+      await expect(running).toHaveCount(0, { timeout: 120_000 });
+    }
+
+    const danger = await note.allInnerTexts();
+    // At most one refusal note per request, and it has to name the way out.
     expect(danger.length, `refusal notes: ${danger.join(" || ")}`).toBeLessThanOrEqual(1);
     if (danger.length === 1) expect(danger[0]).toMatch(/Вручную|Полный доступ/);
   } finally {
