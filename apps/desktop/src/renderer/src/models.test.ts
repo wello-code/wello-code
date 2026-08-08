@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CONTEXT_WINDOW_1M, DEFAULT_CODE_MODEL, MODELS_1M_CONTEXT } from "@wello-code/contracts";
-import {
-  FALLBACK_CONTEXT_WINDOW,
-  MODELS,
-  MODELS_NOTE,
-  contextWindowFor,
-  modelAvailability,
-} from "./models";
+import { FALLBACK_CONTEXT_WINDOW, MODELS, contextWindowFor, modelAvailability } from "./models";
 
 describe("modelAvailability (picker health marks)", () => {
   // A live shape from the gateway's public status: catalog ids with dots.
@@ -118,15 +112,13 @@ describe("the picker and the fallback agree", () => {
     expect(MODELS[0]!.id).toBe(DEFAULT_CODE_MODEL);
   });
 
-  it("offers only models we serve on the fast-cache path, and says why", () => {
-    // The short list is a temporary owner decision (2026-08-08). The note is what
-    // a person reads when a model they used yesterday is gone.
+  it("offers only the models we currently serve on the fast-cache path", () => {
+    // The short list is a temporary owner decision (2026-08-08).
     expect(MODELS.map((m) => m.id)).toEqual([
       "claude-opus-5",
       "gpt-5.6-luna",
       "gpt-5.6-terra",
       "gpt-5.6-sol",
     ]);
-    expect(MODELS_NOTE.trim()).not.toBe("");
   });
 });

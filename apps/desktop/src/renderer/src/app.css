@@ -2148,40 +2148,23 @@ body.is-col-resizing {
   max-width: 780px;
   margin: 0 auto;
 }
-/* The strip row: the folder button grows, the worktree chip hangs on its right. */
+/* The strip row: one continuous header on top of the composer. The folder button
+   grows; every control to its right is a SEGMENT of the same strip, not a pill
+   parked beside it — a lone pill sat outside the composer's rounded box, at its
+   own height and with its own shape, and read as a stray control. */
 .composer__projectrow {
   display: flex;
   align-items: stretch;
-  gap: 6px;
+  gap: 0;
 }
 .composer__projectrow .composer__project {
   flex: 1;
   min-width: 0;
 }
+/* Both right-hand segments share the strip's look; only the LAST one keeps the
+   outer corner, so any combination of them still ends in one rounded edge. */
+.projectdirs,
 .wtchip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-  align-self: flex-start;
-  margin-top: 6px;
-  padding: 5px 10px;
-  border: 1px solid var(--border-default);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
-  white-space: nowrap;
-  transition: color var(--motion-hover), border-color var(--motion-hover), background var(--motion-hover);
-}
-.wtchip:hover {
-  color: var(--text-primary);
-  background: var(--surface-1);
-}
-/* «Ещё папки» is the RIGHT HALF of the composer's project header, not a pill
-   parked next to it: same surface, same hairline, only the outer corner
-   rounded, so the two read as one strip (a lone pill there looked pasted on). */
-.projectdirs {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -2191,7 +2174,7 @@ body.is-col-resizing {
   border: 1px solid var(--border-subtle);
   border-left: none;
   border-bottom: none;
-  border-radius: 0 var(--radius-lg) 0 0;
+  border-radius: 0;
   background: var(--surface-raised);
   color: var(--text-muted);
   font-size: 12px;
@@ -2200,15 +2183,16 @@ body.is-col-resizing {
     background var(--motion-hover),
     color var(--motion-hover);
 }
-.projectdirs:hover {
+.composer__projectrow > :last-child {
+  border-radius: 0 var(--radius-lg) 0 0;
+}
+.projectdirs:hover,
+.wtchip:hover {
   background: var(--surface-1);
   color: var(--text-primary);
 }
-/* The project card gives up its right corner (and the gap) to its new neighbour. */
-.composer__projectrow:has(.projectdirs) {
-  gap: 0;
-}
-.composer__projectrow:has(.projectdirs) .composer__project {
+/* The project card gives up its right corner to whatever segment follows it. */
+.composer__projectrow:has(.projectdirs, .wtchip) .composer__project {
   border-right: none;
   border-radius: var(--radius-lg) 0 0 0;
 }
@@ -2217,10 +2201,15 @@ body.is-col-resizing {
   color: var(--accent, var(--text-primary));
   font: 11px / 1 var(--font-code);
 }
+/* Switched on: the segment tints instead of growing a border, so the strip keeps
+   one silhouette whether the task goes to a copy of the project or not. */
 .wtchip.is-on {
   color: var(--accent, var(--text-primary));
-  border-color: color-mix(in srgb, var(--accent, currentColor) 55%, transparent);
-  background: color-mix(in srgb, var(--accent, currentColor) 10%, transparent);
+  background: color-mix(in srgb, var(--accent, currentColor) 12%, var(--surface-raised));
+}
+.wtchip.is-on:hover {
+  color: var(--accent, var(--text-primary));
+  background: color-mix(in srgb, var(--accent, currentColor) 18%, var(--surface-raised));
 }
 
 .composer__project {
@@ -6622,13 +6611,4 @@ body.is-row-resizing {
 /* Settings: "System" theme swatch. */
 .themecard--system .themecard__preview {
   background: linear-gradient(105deg, #191919 0 50%, #f3f3f2 50% 100%); /* token-lint-ignore: shows both themes side by side */
-}
-
-/* Why the model list is short right now. Quiet on purpose: it explains a choice,
-   it is not a warning, so it must not compete with the outage line above it. */
-.modelsel__note {
-  margin: 0 9px 6px;
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.4;
 }
