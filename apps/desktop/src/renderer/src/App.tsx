@@ -2826,16 +2826,52 @@ ${t.workspaceName}` : t.title
             update.state === "manual" ||
             update.state === "ready" ||
             update.state === "downloading") ? (
-            <div className="updbar">
-              <span className="updbar__dot" aria-hidden />
-              <span className="updbar__text">
-                {update.state === "downloading"
-                  ? `Загрузка… ${update.percent}%`
-                  : `Версия ${update.version} доступна`}
-              </span>
-              {update.state === "downloading" ? null : (
+            /* Two rows, not one. On one row the version number was the only
+               flexible thing between a button and a close cross, so in a 212px
+               sidebar it ellipsised down to «Версия 0.1....» — the notification
+               hid the single fact it exists to deliver. The number now owns its
+               line and the action owns the next one. */
+            <div className="updbar" role="status">
+              <div className="updbar__head">
+                <span className="updbar__dot" aria-hidden />
+                <span className="updbar__title">
+                  {update.state === "downloading"
+                    ? // One word, so the head row stays one line next to the
+                      // percentage; the bar underneath says the rest.
+                      "Загрузка"
+                    : update.state === "ready"
+                      ? // NOT «доступна»: it is already on the disk, and the
+                        // button below says «Перезапустить». The old text said
+                        // «доступна» here too, which contradicted the button.
+                        `Версия ${update.version} загружена`
+                      : `Версия ${update.version}`}
+                </span>
+                {update.state === "downloading" ? (
+                  <span className="updbar__pct">{update.percent}%</span>
+                ) : null}
                 <button
-                  className="button ghost sm updbar__action"
+                  className="updbar__x"
+                  title="Скрыть до перезапуска"
+                  aria-label="Скрыть уведомление об обновлении"
+                  onClick={() => setUpdateHidden(true)}
+                >
+                  <Icon name="x" size={11} />
+                </button>
+              </div>
+              {update.state === "downloading" ? (
+                <div
+                  className="updbar__track"
+                  role="progressbar"
+                  aria-label="Загрузка обновления"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={update.percent}
+                >
+                  <span className="updbar__fill" style={{ width: `${update.percent}%` }} />
+                </div>
+              ) : (
+                <button
+                  className="button primary sm block updbar__cta"
                   onClick={() => {
                     if (update.state === "ready") void window.wello.installUpdate();
                     // A .deb cannot replace itself — hand over the download page.
@@ -2850,14 +2886,6 @@ ${t.workspaceName}` : t.title
                       : "Обновить"}
                 </button>
               )}
-              <button
-                className="updbar__x"
-                title="Скрыть до перезапуска"
-                aria-label="Скрыть уведомление об обновлении"
-                onClick={() => setUpdateHidden(true)}
-              >
-                <Icon name="x" size={11} />
-              </button>
             </div>
           ) : null}
           {(() => {

@@ -5929,17 +5929,25 @@ body.is-row-resizing {
 /* --- Update notice (sidebar footer) -------------------------------------
    The updater has always worked; it just had no voice outside Settings. One
    quiet row, dismissible for the session, with the single action that matters. */
+/* The pending-release card in the sidebar footer. Two rows: what it is, then
+   what to do about it. One row could not hold a version number next to a button
+   at this width, and the number was the part that got cut. */
 .updbar {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 7px;
   margin: 0 8px 6px;
-  padding: 6px 8px;
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border-subtle));
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border-subtle));
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--accent) 8%, var(--surface-2));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-2));
   font-size: 11.5px;
   color: var(--text-secondary);
+}
+.updbar__head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
 }
 .updbar__dot {
   flex: none;
@@ -5947,17 +5955,57 @@ body.is-row-resizing {
   height: 6px;
   border-radius: 999px;
   background: var(--accent);
+  /* A quiet heartbeat, so a new release registers without a badge shouting. The
+     root [data-motion="reduce"] rule switches this off with everything else. */
+  animation: updbar-pulse 2.4s var(--ease-standard) infinite;
 }
-.updbar__text {
+@keyframes updbar-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  50% {
+    opacity: 0.75;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+}
+/* The version, in full. Wraps rather than ellipsises: a long tag
+   («0.11.140-beta.2») takes a second line instead of losing its tail. */
+.updbar__title {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
-.updbar__action {
+.updbar__cta {
+  height: 26px;
+}
+/* Download progress. The percentage sits in the row above, next to the title,
+   and the bar stays a bar: text ON the fill was legible only until the fill
+   reached it, which is a contrast bug that appears halfway through a download. */
+.updbar__pct {
   flex: none;
+  font-size: 10.5px;
+  font-weight: 560;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+.updbar__track {
+  position: relative;
+  height: 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-3));
+  overflow: hidden;
+}
+.updbar__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent);
+  transition: width var(--motion-standard) var(--ease-standard);
 }
 .updbar__x {
   display: grid;
