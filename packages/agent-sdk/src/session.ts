@@ -11,6 +11,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import {
+  MODELS_1M_CONTEXT,
   parseAgentEvent,
   type AgentEvent,
   type PermissionDecision,
@@ -477,12 +478,7 @@ export type WelloEffort = EffortLevel | "ultra";
  * model variant makes its context gauge and auto-compaction use the real window;
  * the suffix is engine-internal — API requests still carry the clean model id.
  */
-const MODELS_1M = new Set([
-  "claude-sonnet-5",
-  "claude-opus-5",
-  "claude-opus-4-8",
-  "claude-fable-5",
-]);
+const MODELS_1M = new Set(MODELS_1M_CONTEXT);
 
 /** The id handed to the engine: 1M-class models ride the "[1m]" variant. */
 export function engineModelId(model: string): string {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { CONTEXT_WINDOW_1M, MODELS_1M_CONTEXT } from "@wello-code/contracts";
 import { FALLBACK_CONTEXT_WINDOW, MODELS, contextWindowFor, modelAvailability } from "./models";
 
 describe("modelAvailability (picker health marks)", () => {
@@ -69,14 +70,28 @@ describe("contextWindowFor", () => {
     expect(contextWindowFor("gpt-5.6-terra", 200_000)).toBe(400_000);
   });
 
-  it("trusts the engine for the models it actually knows", () => {
-    expect(contextWindowFor("claude-sonnet-5", 1_000_000)).toBe(1_000_000);
-    expect(contextWindowFor("claude-opus-5", 200_000)).toBe(200_000);
+  it("gives the million-token models their real window, whatever the engine says", () => {
+    // The engine does not know these ids either — it answers with its 200K
+    // default, and the gauge used to believe it. Opus 5 read «163к свободно»
+    // while the same model was carrying 313K prompts (2026-08-08).
+    for (const id of MODELS_1M_CONTEXT) {
+      expect(contextWindowFor(id, 200_000), id).toBe(CONTEXT_WINDOW_1M);
+      expect(contextWindowFor(id, null), id).toBe(CONTEXT_WINDOW_1M);
+    }
   });
 
-  it("falls back only when nothing has been reported yet", () => {
-    expect(contextWindowFor("claude-sonnet-5", null)).toBe(FALLBACK_CONTEXT_WINDOW);
-    expect(contextWindowFor("claude-sonnet-5", 0)).toBe(FALLBACK_CONTEXT_WINDOW);
+  it("keeps every model in the picker off the flat fallback", () => {
+    // The fallback exists for a model nobody listed; a model a person can SELECT
+    // should always have a real number behind its ring.
+    for (const m of MODELS) {
+      expect(contextWindowFor(m.id, null), m.id).not.toBe(FALLBACK_CONTEXT_WINDOW);
+    }
+  });
+
+  it("still trusts the engine where we have no opinion", () => {
+    expect(contextWindowFor("some-future-model", 300_000)).toBe(300_000);
+    expect(contextWindowFor("some-future-model", null)).toBe(FALLBACK_CONTEXT_WINDOW);
+    expect(contextWindowFor("some-future-model", 0)).toBe(FALLBACK_CONTEXT_WINDOW);
   });
 
   it("never returns zero, whatever it is handed", () => {

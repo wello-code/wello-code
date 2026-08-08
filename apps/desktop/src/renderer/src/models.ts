@@ -6,6 +6,8 @@
  * wrong number there tells someone they have room when they do not.
  */
 
+import { CONTEXT_WINDOW_1M, MODELS_1M_CONTEXT } from "@wello-code/contracts";
+
 export interface PickerModel {
   id: string;
   label: string;
@@ -39,11 +41,19 @@ export const FALLBACK_CONTEXT_WINDOW = 200_000;
  *
  * That is why this map wins over the reported value instead of standing behind
  * it: here we are right and the report is a placeholder.
+ *
+ * The Claude models are here for exactly the same reason, and it took a live run
+ * to notice: the engine does not know these ids either, so it answered with its
+ * 200K default and the gauge read «37к использовано / 163к свободно» on a model
+ * that had just carried a 313K prompt (Opus 5, 2026-08-08). Five times too small
+ * is not a cosmetic error — it is the number that decides when someone is told to
+ * split a task, and when the run compacts a context that had plenty of room.
  */
 const KNOWN_CONTEXT_WINDOW: Record<string, number> = {
   "gpt-5.6-luna": 400_000,
   "gpt-5.6-terra": 400_000,
   "gpt-5.6-sol": 400_000,
+  ...Object.fromEntries(MODELS_1M_CONTEXT.map((id) => [id, CONTEXT_WINDOW_1M])),
 };
 
 /**

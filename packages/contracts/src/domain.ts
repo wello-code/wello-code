@@ -72,3 +72,28 @@ export const AgentRun = z.object({
   checkpointIds: z.array(z.string()),
 });
 export type AgentRun = z.infer<typeof AgentRun>;
+
+/**
+ * Models the Wello upstream serves with their native million-token window.
+ *
+ * One list, in the one place both halves of the app can read, because two very
+ * different pieces of code have to agree on it and neither can tell when the
+ * other is wrong. The engine is handed a "[1m]" variant of the model id so its
+ * own budgeting uses the real window; the context gauge divides by the same
+ * number. While only the engine side knew, the gauge fell back to the engine's
+ * reported default of 200K and told people a task was half spent when it had
+ * used a tenth — measured on Opus 5, which had just carried a 313K prompt end to
+ * end (2026-08-08).
+ *
+ * ⚠️ Ids are spelled the way the PICKER and the engine spell them (dashes:
+ * `claude-opus-4-8`). The server catalog spells the same model with a dot; these
+ * are not interchangeable, and matching the wrong side silently drops an entry.
+ */
+export const CONTEXT_WINDOW_1M = 1_000_000;
+
+export const MODELS_1M_CONTEXT: readonly string[] = [
+  "claude-sonnet-5",
+  "claude-opus-5",
+  "claude-opus-4-8",
+  "claude-fable-5",
+];
