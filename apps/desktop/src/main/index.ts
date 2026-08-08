@@ -5,7 +5,12 @@ import * as os from "node:os";
 import { basename } from "node:path";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, session, shell } from "electron";
 import { join } from "node:path";
-import type { AgentEvent, PermissionDecision, QuestionAnswer } from "@wello-code/contracts";
+import {
+  DEFAULT_CODE_MODEL,
+  type AgentEvent,
+  type PermissionDecision,
+  type QuestionAnswer,
+} from "@wello-code/contracts";
 import type {
   AppInfo,
   AppSettings,
@@ -670,7 +675,7 @@ function registerIpc(): void {
       const r = await generateHandoff(
         key,
         transcript,
-        typeof model === "string" && model ? model : "claude-sonnet-5",
+        typeof model === "string" && model ? model : DEFAULT_CODE_MODEL,
       );
       // Every failure gets a line in the app log — the reason reaching the UI is
       // for the user, this is for us when they send the log.
@@ -784,7 +789,7 @@ function registerIpc(): void {
     return generateCommitMessage(
       key,
       diff,
-      typeof model === "string" && model ? model : "claude-sonnet-5",
+      typeof model === "string" && model ? model : DEFAULT_CODE_MODEL,
       prefs.gitCommitInstructions,
     );
   });
@@ -977,7 +982,7 @@ function registerIpc(): void {
       return generatePrText(
         key,
         context,
-        typeof model === "string" && model ? model : "claude-sonnet-5",
+        typeof model === "string" && model ? model : DEFAULT_CODE_MODEL,
         prefs.gitPrInstructions,
       );
     },

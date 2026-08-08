@@ -6575,3 +6575,12 @@ body.is-row-resizing {
 .themecard--system .themecard__preview {
   background: linear-gradient(105deg, #191919 0 50%, #f3f3f2 50% 100%); /* token-lint-ignore: shows both themes side by side */
 }
+
+/* Why the model list is short right now. Quiet on purpose: it explains a choice,
+   it is not a warning, so it must not compete with the outage line above it. */
+.modelsel__note {
+  margin: 0 9px 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}

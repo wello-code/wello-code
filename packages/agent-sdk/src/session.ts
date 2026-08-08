@@ -11,6 +11,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import {
+  DEFAULT_CODE_MODEL,
   MODELS_1M_CONTEXT,
   parseAgentEvent,
   type AgentEvent,
@@ -654,7 +655,7 @@ export interface SdkRunRequest {
   workspacePath: string;
   mode: TaskMode;
   prompt: string;
-  /** Wello catalog model id (e.g. "claude-sonnet-5"). Defaults to Sonnet. */
+  /** Wello catalog model id (e.g. "claude-opus-5"). Defaults to DEFAULT_CODE_MODEL. */
   model?: string;
   /** Reasoning effort: low → max, plus "ultra" (= xhigh + subagent orchestration). */
   effort?: WelloEffort;
@@ -1342,7 +1343,7 @@ export class SdkAgentSession {
     });
 
     const permissionMode = sdkPermissionMode(req.mode);
-    const model = engineModelId(req.model ?? "claude-sonnet-5");
+    const model = engineModelId(req.model ?? DEFAULT_CODE_MODEL);
     const { engineEffort, thinkingBudget, ultra } = resolveEffort(req.effort);
     // Self-injected project instructions (AGENTS.md): the engine only loads
     // CLAUDE.md natively, so the runtime reads AGENTS.md and appends it here.

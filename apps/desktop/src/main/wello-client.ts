@@ -5,6 +5,7 @@
  * the PAYG balance — /code/v1/access is the billing status for the titlebar chip.
  */
 import { app } from "electron";
+import { DEFAULT_CODE_MODEL } from "@wello-code/contracts";
 
 const BASE_URL = "https://api.wello.dev";
 /** The /code API base — subscription-first billing for the coding agent. */
@@ -403,9 +404,10 @@ export async function generateTitle(apiKey: string, prompt: string): Promise<str
       method: "POST",
       headers: authHeaders(apiKey, true),
       body: JSON.stringify({
-        // Sonnet 5 since 2026-07-15 (haiku and sonnet-4.6 are dead upstream); a title
-        // turn is ~1K tokens, so the price difference is noise.
-        model: "claude-sonnet-5",
+        // Whatever the picker's default is: a title turn is ~1K tokens, so the
+        // price difference between models is noise, and pinning a model here is
+        // how one of them kept being called after being withdrawn.
+        model: DEFAULT_CODE_MODEL,
         max_tokens: 30,
         system:
           "Придумай очень короткое название задачи (2-4 слова, без кавычек и точки в конце) " +

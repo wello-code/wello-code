@@ -15,18 +15,32 @@ export interface PickerModel {
 }
 
 /**
- * Haiku 4.5 is not in the Wello catalog; a stored selection of it falls back to
- * the first entry via initialModel()'s validation.
+ * What a person can pick, and the first entry is the default.
+ *
+ * Deliberately shorter than the Wello catalog since 2026-08-08 (owner decision,
+ * temporary): only the models whose turns re-read a cached context instead of
+ * paying for the whole conversation again, which is what decides how fast a
+ * month's allowance drains. A stored selection of anything absent here falls
+ * back to the first entry via initialModel()'s validation, so someone who had
+ * another model chosen simply lands on this one.
+ *
+ * When the rest come back, they go back in this list — and the reason the list
+ * is short is stated to the person in the picker itself (see MODELS_NOTE).
  */
 export const MODELS: PickerModel[] = [
-  { id: "claude-sonnet-5", label: "Sonnet 5", hint: "Баланс скорости и качества" },
   { id: "claude-opus-5", label: "Opus 5", hint: "Новейший Opus, максимум качества" },
-  { id: "claude-opus-4-8", label: "Opus 4.8", hint: "Сложные задачи, максимум качества" },
-  { id: "claude-fable-5", label: "Fable 5", hint: "Флагман с размышлениями" },
   { id: "gpt-5.6-luna", label: "GPT Luna", hint: "Самая быстрая и дешёвая" },
   { id: "gpt-5.6-terra", label: "GPT Terra", hint: "Дешевле Claude, с размышлениями" },
   { id: "gpt-5.6-sol", label: "GPT Sol", hint: "Самая мощная в линейке GPT" },
 ];
+
+/**
+ * Why the list is short, in the one place someone looks when a model they used
+ * yesterday is missing. Says what it means for them rather than what happened on
+ * our side: the allowance lasts longer here, and that is true for exactly the
+ * reason these models are the ones left.
+ */
+export const MODELS_NOTE = "Пока оставили модели, на которых лимит расходуется медленнее.";
 
 /** Default when nothing else says otherwise (every catalog Claude model). */
 export const FALLBACK_CONTEXT_WINDOW = 200_000;

@@ -97,3 +97,13 @@ export const MODELS_1M_CONTEXT: readonly string[] = [
   "claude-opus-4-8",
   "claude-fable-5",
 ];
+
+/**
+ * The model a request falls back to when nothing else picked one.
+ *
+ * One constant, because it was five copies of the same literal — the engine's
+ * default, chat titles, commit messages, PR text and the handoff summary — and a
+ * model withdrawn from the picker kept being sent by all of them. Whatever the
+ * picker offers first, this has to name a model we actually serve well.
+ */
+export const DEFAULT_CODE_MODEL = "claude-opus-5";

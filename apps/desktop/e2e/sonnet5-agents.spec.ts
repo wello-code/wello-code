@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { _electron as electron, expect, test, type Page } from "@playwright/test";
-import { closeApp } from "./helpers";
+import { closeApp, modelOffered } from "./helpers";
 
 /**
  * «Все агенты и субагенты падают при попытке вызова Bash» (0.1.13).
@@ -19,14 +19,20 @@ const KEY = process.env.WELLO_TEST_KEY;
 
 async function open(
   page: Page,
-  opts: { fullAccess?: boolean; plan?: boolean; auto?: boolean } = {},
+  opts: { fullAccess?: boolean; plan?: boolean; auto?: boolean; sonnet?: boolean } = {},
 ): Promise<void> {
   await page.getByRole("button", { name: "Войти по API-ключу" }).click();
   await page.getByPlaceholder("wlo_live_").fill(KEY!);
   await page.getByRole("button", { name: "Подключить" }).click();
   await page.locator(".composer__project").click();
   await page.getByRole("button", { name: "Доверяю папке" }).click();
-  await expect(page.getByRole("button", { name: /Sonnet 5/ }).first()).toBeVisible();
+  // Sonnet 5 is temporarily out of the picker; these cases ask for it rather than
+  // assuming it, and skip while it is away instead of failing.
+  if (opts.sonnet) {
+    const offered = await modelOffered(page, /Sonnet 5/);
+    test.skip(!offered, "Sonnet 5 is not in the picker right now");
+    await page.getByRole("option", { name: /Sonnet 5/ }).click();
+  }
   if (opts.fullAccess) {
     await page.getByRole("button", { name: "Вручную" }).click();
     await page.getByRole("option", { name: /Полный доступ/ }).click();
@@ -55,7 +61,7 @@ test("Sonnet 5: a subagent runs a shell command and reports back", async () => {
       (dialog as any).showOpenDialog = async () => ({ canceled: false, filePaths: [wsPath] });
     }, ws);
     const page = await app.firstWindow();
-    await open(page, { fullAccess: true });
+    await open(page, { fullAccess: true, sonnet: true });
 
     await page
       .getByPlaceholder(/Спросите/)
@@ -94,7 +100,7 @@ test("Sonnet 5: a command the engine refuses by itself is named, and the run end
     const page = await app.firstWindow();
     // «План» is where the engine blocks a mutating command on its own, without
     // consulting our permission card at all.
-    await open(page, { plan: true });
+    await open(page, { plan: true, sonnet: true });
 
     await page
       .getByPlaceholder(/Спросите/)
@@ -153,7 +159,7 @@ test("Sonnet 5: «Авто» never buries the person under repeated refusals", a
       (dialog as any).showOpenDialog = async () => ({ canceled: false, filePaths: [wsPath] });
     }, ws);
     const page = await app.firstWindow();
-    await open(page, { auto: true });
+    await open(page, { auto: true, sonnet: true });
 
     // Three commands in one turn: if the judge refuses, it refuses all three.
     await page

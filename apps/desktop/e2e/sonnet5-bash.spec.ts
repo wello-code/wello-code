@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { _electron as electron, expect, test } from "@playwright/test";
-import { closeApp } from "./helpers";
+import { closeApp, modelOffered } from "./helpers";
 
 /**
  * Two reports from one person on 0.1.13, both on the default model: every run
@@ -34,9 +34,11 @@ test("Sonnet 5: a shell command runs, and the context ring is there", async () =
     await page.getByRole("button", { name: "Подключить" }).click();
     await page.locator(".composer__project").click();
     await page.getByRole("button", { name: "Доверяю папке" }).click();
-    // Sonnet 5 is the default, and the model both reports were made on. Asserted
-    // rather than selected, so a changed default cannot silently move this test.
-    await expect(page.getByRole("button", { name: /Sonnet 5/ }).first()).toBeVisible();
+    // The model both reports were made on. It is temporarily out of the picker,
+    // so this asks rather than fails — and runs again the day it returns.
+    const offered = await modelOffered(page, /Sonnet 5/);
+    test.skip(!offered, "Sonnet 5 is not in the picker right now");
+    await page.getByRole("option", { name: /Sonnet 5/ }).click();
     await page.getByRole("button", { name: "Вручную" }).click();
     await page.getByRole("option", { name: /Полный доступ/ }).click();
     await page.getByRole("button", { name: "Понимаю, включить" }).click();

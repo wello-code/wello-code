@@ -30,14 +30,19 @@ async function connect(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Подключить" }).click();
 }
 
-/** Switch the picker to Opus 5 — the model this whole file is about. */
+/**
+ * Select Opus 5 — and on the way, check the two things a fresh profile shows:
+ * this model is the DEFAULT (everything else falls back to it), and the picker
+ * explains why the list is short, where a person looks for a missing model.
+ */
 async function useOpus5(page: Page): Promise<void> {
   await page
     .getByRole("button", { name: /Sonnet 5|Opus|Fable|GPT/ })
     .first()
     .click();
-  // «Opus 5» and not /Opus/: the menu also lists Opus 4.8, which is a different
-  // model and would quietly pass every assertion below.
+  await expect(page.locator(".modelsel__note")).toBeVisible();
+  // «Opus 5» and not /Opus/: were Opus 4.8 ever back in the list, a loose match
+  // would quietly pass every assertion below on the wrong model.
   await page.getByRole("option", { name: /Opus 5/ }).click();
   await expect(page.getByRole("button", { name: /Opus 5/ }).first()).toBeVisible();
 }
@@ -74,6 +79,9 @@ test("Opus 5: reads an image through a tool, keeps project memory, shows the con
     const page = await app.firstWindow();
     await connect(page);
     await trustProject(page);
+    // A fresh profile has picked nothing yet, so what the button shows IS the
+    // default — and everything that falls back to a model has to agree with it.
+    await expect(page.getByRole("button", { name: /Opus 5/ }).first()).toBeVisible();
     await useOpus5(page);
     await fullAccess(page);
 

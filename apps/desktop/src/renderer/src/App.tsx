@@ -56,7 +56,7 @@ import { detectMention, rankFileMentions, type MentionQuery } from "./file-menti
 import { matchHotkey } from "./hotkeys";
 import { mergeQueued } from "./queued";
 import { contextAdvice } from "./context-cost";
-import { MODELS, contextWindowFor, modelAvailability } from "./models";
+import { MODELS, MODELS_NOTE, contextWindowFor, modelAvailability } from "./models";
 import { deriveProjects, filterByProject, projectExists, type Project } from "./projects";
 import { detectSlash, rankSlashCommands, type SlashQuery } from "./slash-command";
 import { commandArgString, expandCommandTemplate } from "../../shared/slash-template";
@@ -5899,6 +5899,7 @@ function ModelSelect({
       {open ? (
         <div className="modelsel__menu" role="listbox" aria-label="Модель">
           <p className="modelsel__caption">Модель</p>
+          <p className="modelsel__note">{MODELS_NOTE}</p>
           {currentDown ? (
             <p className="modelsel__outage" role="status">
               {current.label} сейчас недоступна — сервис восстанавливается.

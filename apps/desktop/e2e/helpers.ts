@@ -1,5 +1,5 @@
 import { deflateSync } from "node:zlib";
-import type { ElectronApplication } from "@playwright/test";
+import type { ElectronApplication, Page } from "@playwright/test";
 
 /**
  * Close the app even when a run is still in flight: the close guard holds the
@@ -77,4 +77,22 @@ function crc32(buf: Buffer): number {
   let c = 0xffffffff;
   for (const byte of buf) c = CRC_TABLE[(c ^ byte) & 0xff]! ^ (c >>> 8);
   return (c ^ 0xffffffff) >>> 0;
+}
+
+/**
+ * Open the model picker and report whether it offers a model, closing it again
+ * when it does not.
+ *
+ * Written when part of the catalog was temporarily withdrawn from the picker
+ * (2026-08-08): the specs for those models are worth keeping for when they come
+ * back, so they ask instead of failing on a missing option.
+ */
+export async function modelOffered(page: Page, name: RegExp): Promise<boolean> {
+  await page
+    .getByRole("button", { name: /Sonnet 5|Opus|Fable|GPT/ })
+    .first()
+    .click();
+  const offered = (await page.getByRole("option", { name }).count()) > 0;
+  if (!offered) await page.keyboard.press("Escape");
+  return offered;
 }

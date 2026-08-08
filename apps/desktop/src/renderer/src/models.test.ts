@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { CONTEXT_WINDOW_1M, MODELS_1M_CONTEXT } from "@wello-code/contracts";
-import { FALLBACK_CONTEXT_WINDOW, MODELS, contextWindowFor, modelAvailability } from "./models";
+import { CONTEXT_WINDOW_1M, DEFAULT_CODE_MODEL, MODELS_1M_CONTEXT } from "@wello-code/contracts";
+import {
+  FALLBACK_CONTEXT_WINDOW,
+  MODELS,
+  MODELS_NOTE,
+  contextWindowFor,
+  modelAvailability,
+} from "./models";
 
 describe("modelAvailability (picker health marks)", () => {
   // A live shape from the gateway's public status: catalog ids with dots.
@@ -100,5 +106,27 @@ describe("contextWindowFor", () => {
         expect(contextWindowFor(model, reported), `${model}/${reported}`).toBeGreaterThan(0);
       }
     }
+  });
+});
+
+describe("the picker and the fallback agree", () => {
+  it("offers the model that everything else falls back to, first", () => {
+    // The engine's default, chat titles, commit messages, PR text and the handoff
+    // all fall back to DEFAULT_CODE_MODEL. If the picker's first entry were a
+    // different model, a person would be on one model and those calls on another
+    // — which is how a withdrawn model kept being used.
+    expect(MODELS[0]!.id).toBe(DEFAULT_CODE_MODEL);
+  });
+
+  it("offers only models we serve on the fast-cache path, and says why", () => {
+    // The short list is a temporary owner decision (2026-08-08). The note is what
+    // a person reads when a model they used yesterday is gone.
+    expect(MODELS.map((m) => m.id)).toEqual([
+      "claude-opus-5",
+      "gpt-5.6-luna",
+      "gpt-5.6-terra",
+      "gpt-5.6-sol",
+    ]);
+    expect(MODELS_NOTE.trim()).not.toBe("");
   });
 });
