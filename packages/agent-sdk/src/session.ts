@@ -841,6 +841,13 @@ interface RunMapState {
     byId: Map<string, { text: string; status: "pending" | "in_progress" | "completed" }>;
     pendingCreates: Map<string, string>;
   };
+  /**
+   * What the context gauge is allowed to believe. `lastPerCall` is the size of
+   * the conversation as of the most recent API call — the only honest figure,
+   * since the result frame reports the run's TOTAL (see the `result` case).
+   * `apiCalls` counts the calls that produced that total, subagents included.
+   */
+  context: { lastPerCall: number | null; apiCalls: number };
 }
 
 /** The engine's tool_result for TaskCreate names the new id: "Task #7 created…". */
@@ -885,8 +892,12 @@ export function todosFromToolInput(
 }
 
 /**
- * Tokens occupying the context window after an assistant turn: fresh input +
- * cache reads/writes + the answer itself. Null when the message carries no usage.
+ * Tokens occupying the context window after ONE API call: fresh input + cache
+ * reads/writes + the answer itself. Null when the message carries no usage.
+ *
+ * Feed it a single call's usage. Feeding it a run total (the `result` frame)
+ * returns the sum of every call's context, which is a much larger number that
+ * means nothing — the caller there guards against exactly that.
  */
 export function contextTokensFromUsage(usage: unknown): number | null {
   if (!usage || typeof usage !== "object") return null;
@@ -898,6 +909,35 @@ export function contextTokensFromUsage(usage: unknown): number | null {
     n(u.cache_read_input_tokens) +
     n(u.output_tokens);
   return total > 0 ? total : null;
+}
+
+/**
+ * What the context gauge may take from a run's `result` frame.
+ *
+ * ⚠️ That frame's `usage` is the run's TOTAL — every API call the turn made,
+ * summed; it is what `total_cost_usd` is computed from. It is NOT the size of
+ * the context, and showing it as one multiplies the gauge by the number of
+ * steps: an agentic turn of seven calls over a 57K conversation reports ~390K,
+ * and the «сожмите контекст» banner then accuses a dialogue that has not grown
+ * at all. It looks per-turn in a plain chat only because a plain chat's turn is
+ * a single call, which is how it passed review in the first place.
+ *
+ * So: when the stream gave us per-call usage, that is the truth and this returns
+ * null (nothing to add). The total is used only when no call reported usage at
+ * all — some engines fill usage on the final frame of a turn and leave the
+ * assistant frames at zero (2026-08-07: the gauge never appeared on the GPT
+ * family) — and then the total divided by the calls that produced it is an
+ * average context rather than a sum of contexts. It errs LOW, the safe direction
+ * for a nudge: better late than accusing a short conversation.
+ */
+export function contextFromRunTotal(
+  total: number | null,
+  apiCalls: number,
+  lastPerCall: number | null,
+): number | null {
+  if (lastPerCall != null) return null;
+  if (total == null || total <= 0) return null;
+  return Math.round(total / Math.max(1, apiCalls));
 }
 
 /**
@@ -1466,6 +1506,7 @@ export class SdkAgentSession {
       asyncTasks: new Map(),
       result: null,
       plan: { order: [], byId: new Map(), pendingCreates: new Map() },
+      context: { lastPerCall: null, apiCalls: 0 },
     };
 
     try {
@@ -1601,6 +1642,9 @@ export class SdkAgentSession {
       case "assistant": {
         const parentToolUseId = (msg as { parent_tool_use_id?: string | null }).parent_tool_use_id;
         const content = msg.message.content as unknown as ContentBlock[];
+        // One assistant message = one API call, subagents included. Counted here
+        // only so the result frame's total can be read back as an average.
+        mapState.context.apiCalls += 1;
         // A subagent's turn: feed its texts/tool calls into that agent's transcript.
         if (parentToolUseId) {
           for (const block of content) {
@@ -1620,9 +1664,13 @@ export class SdkAgentSession {
           }
           return currentMessageId;
         }
-        // Live context gauge: this turn's usage says how full the window is.
+        // Live context gauge: this CALL's usage is the size of the conversation
+        // right now — its input legs are the whole prompt that was just sent.
         const usedTokens = contextTokensFromUsage((msg.message as { usage?: unknown }).usage);
-        if (usedTokens != null) emit("run.context", { usedTokens });
+        if (usedTokens != null) {
+          mapState.context.lastPerCall = usedTokens;
+          emit("run.context", { usedTokens });
+        }
         const id = currentMessageId ?? randomUUID();
         const texts: string[] = [];
         for (const block of content) {
@@ -1757,15 +1805,14 @@ export class SdkAgentSession {
             : [];
           mapState.result = { ok: false, code: [msg.subtype, ...texts].join(" — ") };
         }
-        // How full the window is after this turn. The per-message usage we read
-        // during the stream is the FIRST frame's, and on the GPT family that
-        // frame carries zeros — their usage only arrives with the last frame of
-        // the turn, so the gauge had nothing to show and simply did not appear
-        // (reported 2026-08-07). The result's usage is that final number, in the
-        // same four-leg shape, and it is per-turn rather than cumulative —
-        // probed live across two turns of one session.
-        const resultUsed = contextTokensFromUsage((msg as { usage?: unknown }).usage);
-        if (resultUsed != null) emit("run.context", { usedTokens: resultUsed });
+        // The gauge's number after the turn. The result frame carries a RUN TOTAL,
+        // not a context size — contextFromRunTotal is where that is spelled out.
+        const fromTotal = contextFromRunTotal(
+          contextTokensFromUsage((msg as { usage?: unknown }).usage),
+          mapState.context.apiCalls,
+          mapState.context.lastPerCall,
+        );
+        if (fromTotal != null) emit("run.context", { usedTokens: fromTotal });
         const modelUsage = (msg as { modelUsage?: Record<string, { contextWindow?: number }> })
           .modelUsage;
         const windowTokens = Object.values(modelUsage ?? {}).reduce(

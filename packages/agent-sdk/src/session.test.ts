@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseAgentEvent } from "@wello-code/contracts";
 import {
   classifyFailure,
+  contextFromRunTotal,
   contextTokensFromUsage,
   engineFingerprint,
   engineModelId,
@@ -327,10 +328,9 @@ describe("workflow.progress event contract", () => {
 });
 
 describe("contextTokensFromUsage", () => {
-  it("reads the shape the engine reports at the END of a turn", () => {
-    // Where the gauge's number now comes from. On the GPT family the per-message
-    // usage streamed mid-turn is all zeros — the real numbers arrive only with
-    // the turn's result — so the ring never appeared at all (reported 2026-08-07).
+  it("reads the shape the engine reports for ONE api call", () => {
+    // Feed it a single call's usage. The run total that the result frame carries
+    // is a different animal — see contextFromRunTotal.
     expect(
       contextTokensFromUsage({
         input_tokens: 3774,
@@ -369,6 +369,38 @@ describe("contextTokensFromUsage", () => {
     expect(contextTokensFromUsage({})).toBeNull();
     expect(contextTokensFromUsage({ input_tokens: 0, output_tokens: 0 })).toBeNull();
     expect(contextTokensFromUsage({ input_tokens: -5 })).toBeNull();
+  });
+});
+
+describe("contextFromRunTotal (the result frame is a run TOTAL, not a context)", () => {
+  it("adds nothing when the stream already reported per-call usage", () => {
+    // An agentic turn: seven API calls over a 57K conversation. Their contexts
+    // sum to ~390K, and showing that sum told the user their dialogue had grown
+    // to 390K and cost 39× a short chat. It had not grown at all.
+    const perCallContexts = [54999, 55287, 55561, 55928, 56277, 56602, 56869];
+    const runTotal = perCallContexts.reduce((a, b) => a + b, 0);
+    expect(runTotal).toBe(391523);
+    expect(contextFromRunTotal(runTotal, 7, 56869)).toBeNull();
+  });
+
+  it("averages the total when no call reported usage", () => {
+    expect(contextFromRunTotal(391523, 7, null)).toBe(55932);
+    // A single-call turn: the total IS the context, which is why the earlier
+    // probe saw no problem.
+    expect(contextFromRunTotal(29892, 1, null)).toBe(29892);
+  });
+
+  it("never divides by zero and never invents a number", () => {
+    expect(contextFromRunTotal(50000, 0, null)).toBe(50000);
+    expect(contextFromRunTotal(null, 7, null)).toBeNull();
+    expect(contextFromRunTotal(0, 7, null)).toBeNull();
+  });
+
+  it("stays under the nudge threshold for a conversation that has not grown", () => {
+    // The regression in one line: a 57K dialogue must not trip the warn (120K)
+    // or urge (300K) thresholds of the renderer's context-cost module.
+    const shown = contextFromRunTotal(391523, 7, 56869) ?? 56869;
+    expect(shown).toBeLessThan(120_000);
   });
 });
 
