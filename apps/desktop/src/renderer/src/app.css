@@ -2873,7 +2873,20 @@ body.is-col-resizing {
   animation: overlay-out 150ms ease both;
   pointer-events: none;
 }
+/* ⚠️ ВЫСОТА ОГРАНИЧЕНА, А СОДЕРЖИМОЕ ПРОКРУЧИВАЕТСЯ. Без этого высокий диалог на
+   невысоком окне просто не помещался: сетка центрирует карточку, а вылезти ей
+   некуда, и низ уходил за нижний край экрана. Кнопок не видно, прокрутить
+   нечего — до содержимого можно было добраться только табом (так и пришёл
+   баг-репорт: «видна только верхняя часть с заголовком»).
+
+   max-height: 100% считается от области сетки, то есть от окна МИНУС падинги
+   .modal, включая отступ под панель заголовка. Поэтому карточка всегда целиком в
+   видимой части, а длинный текст едет внутри неё. */
 .modal__card {
+  display: flex;
+  min-height: 0;
+  max-height: 100%;
+  flex-direction: column;
   width: min(100%, 420px);
   padding: var(--space-4) var(--space-5) var(--space-5);
   border: 1px solid var(--border-default);
@@ -2881,12 +2894,22 @@ body.is-col-resizing {
   background: var(--surface-1);
   box-shadow: var(--elevation-dialog);
 }
+/* Шапка не сжимается и не уезжает: заголовок и крестик должны быть на месте,
+   что бы ни творилось с длиной содержимого. */
 .modal__head {
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
   margin-bottom: var(--space-3);
+}
+/* Прокручивается ТОЛЬКО тело диалога. overscroll-behavior, чтобы докрутив до
+   конца, не начать прокручивать переписку под модалкой. */
+.modal__scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .modal__title {
   font-size: 14px;

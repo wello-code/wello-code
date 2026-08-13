@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "./Icon";
 import { useOverlayMark } from "./overlay-signal";
 import { useFocusTrap } from "./use-focus-trap";
@@ -42,7 +43,20 @@ export function Modal({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [dismiss]);
-  return (
+  // ⚠️ ЧЕРЕЗ ПОРТАЛ, В BODY. Оверлей стоит position: fixed, но fixed отсчитывается
+  // от окна ТОЛЬКО пока ни на одном предке нет transform, filter, perspective или
+  // contain: любое из них делает предка точкой отсчёта. Диалоги у нас
+  // открываются из карточек прямо в ленте (запрос доступа к GitHub, например), а
+  // лента живёт внутри панелей с анимациями, и стоит там появиться трансформации,
+  // как окно уезжает к карточке и за край экрана. Так и пришёл баг-репорт: «видна
+  // только верхняя часть с заголовком, до содержимого добрался табом».
+  //
+  // Замерено: с transform на контейнере ленты оверлей вместо 0,0 1100x700
+  // оказывался на 431,-950, то есть диалог целиком выше видимой области.
+  //
+  // Портал в body убирает весь класс поломок разом, а не конкретного виновника:
+  // у body предков нет. Соседние оверлеи (поповер ветки) уже так и сделаны.
+  return createPortal(
     <div
       className={`modal ${leaving ? "is-leaving" : ""}`}
       role="presentation"
@@ -55,9 +69,14 @@ export function Modal({
             <Icon name="x" size={14} />
           </button>
         </div>
-        <ModalDismissCtx.Provider value={dismiss}>{children}</ModalDismissCtx.Provider>
+        {/* Тело в своей прокрутке: карточка ограничена высотой окна, и длинный
+            диалог должен ехать ВНУТРИ неё, а не за нижний край экрана. */}
+        <div className="modal__scroll">
+          <ModalDismissCtx.Provider value={dismiss}>{children}</ModalDismissCtx.Provider>
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
