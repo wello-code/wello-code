@@ -113,7 +113,7 @@ describe("the picker and the fallback agree", () => {
   });
 
   it("offers only the models we currently serve on the fast-cache path", () => {
-    // The short list is a temporary owner decision (2026-08-08).
+    // The short list is temporary (2026-08-08).
     expect(MODELS.map((m) => m.id)).toEqual([
       "claude-opus-5",
       "gpt-5.6-luna",

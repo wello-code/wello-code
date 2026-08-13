@@ -17,8 +17,8 @@ export interface PickerModel {
 /**
  * What a person can pick, and the first entry is the default.
  *
- * Deliberately shorter than the Wello catalog since 2026-08-08 (owner decision,
- * temporary): only the models whose turns re-read a cached context instead of
+ * Deliberately shorter than the Wello catalog since 2026-08-08, and temporarily
+ * so: only the models whose turns re-read a cached context instead of
  * paying for the whole conversation again, which is what decides how fast a
  * month's allowance drains. A stored selection of anything absent here falls
  * back to the first entry via initialModel()'s validation, so someone who had
