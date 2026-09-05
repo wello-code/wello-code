@@ -48,6 +48,21 @@ describe("the picker", () => {
     expect(MODELS[0]!.id.startsWith("claude-")).toBe(true);
   });
 
+  it("offers Astra, and never as the default", () => {
+    // Astra draws roughly five times the allowance per turn, so it may be on the
+    // list but must never be what someone gets without choosing it.
+    const ids = MODELS.map((m) => m.id);
+    expect(ids).toContain("gpt-6-astra");
+    expect(ids[0]).not.toBe("gpt-6-astra");
+  });
+
+  it("warns in the hint that Astra spends the allowance faster", () => {
+    // The whole reason it is safe to offer: the cost is visible at the moment of
+    // choosing. If this hint is ever emptied, the model should come off the list.
+    const astra = MODELS.find((m) => m.id === "gpt-6-astra")!;
+    expect(astra.hint).toMatch(/лимит/i);
+  });
+
   it("has no duplicates and no empty labels", () => {
     const ids = MODELS.map((m) => m.id);
     expect(new Set(ids).size).toBe(ids.length);
@@ -62,6 +77,7 @@ describe("contextWindowFor", () => {
   it("gives the GPT family its real 400K window", () => {
     expect(contextWindowFor("gpt-5.6-terra", null)).toBe(400_000);
     expect(contextWindowFor("gpt-5.6-sol", null)).toBe(400_000);
+    expect(contextWindowFor("gpt-6-astra", null)).toBe(400_000);
   });
 
   it("OVERRIDES the engine when the engine is guessing", () => {
@@ -113,12 +129,17 @@ describe("the picker and the fallback agree", () => {
   });
 
   it("offers only the models we currently serve on the fast-cache path", () => {
-    // The short list is temporary (2026-08-08).
+    // The short list is temporary (2026-08-08). Astra joined it on 2026-09-05
+    // after a measured agentic session: the cached prefix was read back on 8 of
+    // 10 turns, which is the bar this list exists to enforce. A model that made
+    // every turn re-read the whole conversation would drain a month's allowance
+    // in days, and that is why the list is pinned rather than open.
     expect(MODELS.map((m) => m.id)).toEqual([
       "claude-opus-5",
       "gpt-5.6-luna",
       "gpt-5.6-terra",
       "gpt-5.6-sol",
+      "gpt-6-astra",
     ]);
   });
 });

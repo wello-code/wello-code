@@ -31,6 +31,12 @@ export const MODELS: PickerModel[] = [
   { id: "gpt-5.6-luna", label: "GPT Luna", hint: "Самая быстрая и дешёвая" },
   { id: "gpt-5.6-terra", label: "GPT Terra", hint: "Дешевле Claude, с размышлениями" },
   { id: "gpt-5.6-sol", label: "GPT Sol", hint: "Самая мощная в линейке GPT" },
+  // The strongest option here, and the hint says the price out loud on purpose:
+  // a turn on Astra draws about five times the allowance a turn on Terra does.
+  // Someone who picks it without knowing that hits their monthly limit in a
+  // fifth of the time and reads it as the product cheating them, so the warning
+  // belongs in the picker itself rather than in a changelog nobody opens.
+  { id: "gpt-6-astra", label: "GPT Astra", hint: "Самая сильная, но расходует лимит впятеро быстрее" },
 ];
 
 /** Default when nothing else says otherwise (every catalog Claude model). */
@@ -58,6 +64,7 @@ const KNOWN_CONTEXT_WINDOW: Record<string, number> = {
   "gpt-5.6-luna": 400_000,
   "gpt-5.6-terra": 400_000,
   "gpt-5.6-sol": 400_000,
+  "gpt-6-astra": 400_000,
   ...Object.fromEntries(MODELS_1M_CONTEXT.map((id) => [id, CONTEXT_WINDOW_1M])),
 };
 
