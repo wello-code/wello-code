@@ -88,6 +88,7 @@ export type AgentRun = z.infer<typeof AgentRun>;
  * ⚠️ Ids are spelled the way the PICKER and the engine spell them (dashes:
  * `claude-opus-4-8`). The server catalog spells the same model with a dot; these
  * are not interchangeable, and matching the wrong side silently drops an entry.
+ * (The stable Opus is the one id the picker spells as the catalog does.)
  */
 export const CONTEXT_WINDOW_1M = 1_000_000;
 
@@ -96,6 +97,7 @@ export const MODELS_1M_CONTEXT: readonly string[] = [
   "claude-opus-5",
   "claude-opus-4-8",
   "claude-fable-5",
+  "claude-opus-5.5-stable",
 ];
 
 /**

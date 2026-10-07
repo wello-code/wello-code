@@ -129,6 +129,7 @@ describe("engineModelId", () => {
     expect(engineModelId("claude-opus-5")).toBe("claude-opus-5[1m]");
     expect(engineModelId("claude-opus-4-8")).toBe("claude-opus-4-8[1m]");
     expect(engineModelId("claude-fable-5")).toBe("claude-fable-5[1m]");
+    expect(engineModelId("claude-opus-5.5-stable")).toBe("claude-opus-5.5-stable[1m]");
   });
 
   it("leaves 200K models and unknown ids untouched", () => {

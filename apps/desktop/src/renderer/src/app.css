@@ -2466,6 +2466,27 @@ body.is-col-resizing {
   right: auto;
   left: 0;
 }
+/* The model menu: the list scrolls, the effort slider under it stays put. With
+   more models than fit above the composer, a slider inside the scrolled area
+   ended up below the fold, where nobody would look for it. */
+.modelsel__menu--split {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.modelsel__list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.modelsel__menu--split .effort {
+  flex: none;
+}
+/* Two shelves: wide enough for a hint to stay on one line, so seven rows take
+   the height of seven rows. */
+.modelsel__menu--shelves {
+  min-width: 340px;
+}
 
 /* --- Conversation-context ring (composer) --- */
 .ctx__ring {

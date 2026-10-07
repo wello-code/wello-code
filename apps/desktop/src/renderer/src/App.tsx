@@ -56,7 +56,14 @@ import { detectMention, rankFileMentions, type MentionQuery } from "./file-menti
 import { matchHotkey } from "./hotkeys";
 import { mergeQueued } from "./queued";
 import { contextAdvice } from "./context-cost";
-import { MODELS, contextWindowFor, modelAvailability } from "./models";
+import {
+  MODELS,
+  contextWindowFor,
+  listedModels,
+  modelAvailability,
+  pickerShelves,
+  type PickerModel,
+} from "./models";
 import { deriveProjects, filterByProject, projectExists, type Project } from "./projects";
 import { detectSlash, rankSlashCommands, type SlashQuery } from "./slash-command";
 import { commandArgString, expandCommandTemplate } from "../../shared/slash-template";
@@ -533,7 +540,8 @@ function Workspace({
   const [effort, setEffort] = useState<Effort>(initialEffort);
   // Per-model availability from the gateway's public status: the picker marks
   // models that are down instead of letting the user find out via an error.
-  // Polled gently; null (status unreachable) marks nothing.
+  // Polled gently. Before the first answer nothing is marked; after it, a poll
+  // that fails keeps the last answer — a hiccup must not redraw the picker.
   const [modelHealth, setModelHealth] = useState<Record<string, string> | null>(null);
   useEffect(() => {
     let dead = false;
@@ -542,7 +550,7 @@ function Workspace({
       void window.wello
         .modelStatus()
         .then((s) => {
-          if (!dead) setModelHealth(s);
+          if (!dead && s) setModelHealth(s);
         })
         .catch(() => {});
     };
@@ -2582,7 +2590,9 @@ ${t.workspaceName}` : t.title
       keywords: "open folder папка проект",
       run: () => void openFolder(),
     },
-    ...MODELS.map((m) => ({
+    // The same list the picker shows: a model the service does not offer is not
+    // a command either.
+    ...listedModels(modelHealth, model).map((m) => ({
       id: `model:${m.id}`,
       label: `Модель: ${m.label}`,
       hint: m.hint,
@@ -5776,7 +5786,11 @@ function useDropUp(open: boolean, close: () => void, rootRef: React.RefObject<HT
     const menu = root?.querySelector<HTMLElement>(".modelsel__menu");
     if (!root || !menu) return;
     const apply = (): void => {
-      const room = root.getBoundingClientRect().top - 16;
+      // Measured to the edge of the panel that clips the menu, not to the top of
+      // the window: the panel starts below the title bar, and a menu sized to the
+      // window had its first rows hidden behind that edge once it grew tall.
+      const clipTop = root.closest(".workpanel")?.getBoundingClientRect().top ?? 0;
+      const room = root.getBoundingClientRect().top - clipTop - 16;
       menu.style.maxHeight = `${Math.max(160, room)}px`;
     };
     apply();
@@ -5903,8 +5917,38 @@ function ModelSelect({
   useDropUp(open, () => setOpen(false), rootRef);
   const current = MODELS.find((m) => m.id === value) ?? MODELS[0]!;
   const currentDown = modelAvailability(health, current.id) === false;
+  // What the service offers right now, and the two shelves it falls into (null
+  // while no stable model is offered: then the list looks as it always did).
+  const listed = listedModels(health, value);
+  const shelves = pickerShelves(listed);
   // The honest way out of an outage: the first model that IS being served.
-  const alive = MODELS.find((m) => modelAvailability(health, m.id) !== false);
+  const alive = listed.find((m) => modelAvailability(health, m.id) !== false);
+  const item = (m: PickerModel) => {
+    const down = modelAvailability(health, m.id) === false;
+    return (
+      <button
+        key={m.id}
+        className={`modelsel__item ${m.id === value ? "is-active" : ""} ${down ? "is-down" : ""}`}
+        role="option"
+        aria-selected={m.id === value}
+        onClick={() => {
+          onChange(m.id);
+          setOpen(false);
+        }}
+      >
+        <span className="modelsel__item-body">
+          <span className="modelsel__item-label">
+            {m.label}
+            {down ? <span className="modelsel__downdot" aria-hidden /> : null}
+          </span>
+          <span className="modelsel__item-hint">
+            {down ? "Сейчас недоступна — сервис восстанавливается" : m.hint}
+          </span>
+        </span>
+        {m.id === value ? <Icon name="check" size={13} /> : null}
+      </button>
+    );
+  };
 
   return (
     <div className="modelsel" ref={rootRef}>
@@ -5930,40 +5974,30 @@ function ModelSelect({
         </span>
       </button>
       {open ? (
-        <div className="modelsel__menu" role="listbox" aria-label="Модель">
-          <p className="modelsel__caption">Модель</p>
-          {currentDown ? (
-            <p className="modelsel__outage" role="status">
-              {current.label} сейчас недоступна — сервис восстанавливается.
-              {alive && alive.id !== current.id ? ` Пока можно взять ${alive.label}.` : ""}
-            </p>
-          ) : null}
-          {MODELS.map((m) => {
-            const down = modelAvailability(health, m.id) === false;
-            return (
-              <button
-                key={m.id}
-                className={`modelsel__item ${m.id === value ? "is-active" : ""} ${down ? "is-down" : ""}`}
-                role="option"
-                aria-selected={m.id === value}
-                onClick={() => {
-                  onChange(m.id);
-                  setOpen(false);
-                }}
-              >
-                <span className="modelsel__item-body">
-                  <span className="modelsel__item-label">
-                    {m.label}
-                    {down ? <span className="modelsel__downdot" aria-hidden /> : null}
-                  </span>
-                  <span className="modelsel__item-hint">
-                    {down ? "Сейчас недоступна — сервис восстанавливается" : m.hint}
-                  </span>
-                </span>
-                {m.id === value ? <Icon name="check" size={13} /> : null}
-              </button>
-            );
-          })}
+        <div
+          className={`modelsel__menu modelsel__menu--split ${shelves ? "modelsel__menu--shelves" : ""}`}
+          role="listbox"
+          aria-label="Модель"
+        >
+          <div className="modelsel__list">
+            {shelves ? null : <p className="modelsel__caption">Модель</p>}
+            {currentDown ? (
+              <p className="modelsel__outage" role="status">
+                {current.label} сейчас недоступна — сервис восстанавливается.
+                {alive && alive.id !== current.id ? ` Пока можно взять ${alive.label}.` : ""}
+              </p>
+            ) : null}
+            {shelves ? (
+              <>
+                <p className="modelsel__caption">Стабильные · ровнее в часы пик</p>
+                {shelves.stable.map(item)}
+                <p className="modelsel__caption">Дешёвые · экономят лимит</p>
+                {shelves.ordinary.map(item)}
+              </>
+            ) : (
+              listed.map(item)
+            )}
+          </div>
           <div className="effort">
             <div className="effort__head">
               <span className="modelsel__caption">Усилие</span>
