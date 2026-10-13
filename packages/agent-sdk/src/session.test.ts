@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseAgentEvent } from "@wello-code/contracts";
 import {
   classifyFailure,
+  composeSystemAppend,
   contextFromRunTotal,
   contextTokensFromUsage,
   engineFingerprint,
@@ -174,6 +175,38 @@ describe("runSettings (auto-compaction budget)", () => {
     expect(s.ultracode).toBe(true);
     expect(s.enableWorkflows).toBe(true);
     expect(s.autoCompactEnabled).toBe(false);
+  });
+});
+
+describe("composeSystemAppend (the «Ультра» /workflows correction)", () => {
+  const base = "BASE GUIDANCE";
+
+  it("adds the correction only in «Ультра»", () => {
+    const off = composeSystemAppend({ base, ultra: false });
+    expect(off).not.toContain("/workflows");
+    expect(off).not.toContain("«Субагенты»");
+
+    const on = composeSystemAppend({ base, ultra: true });
+    // The one fact that differs from the CLI: no /workflows command, progress lives
+    // in the Субагенты panel. Both must be present so the model stops the dead-end hint.
+    expect(on).toContain("/workflows");
+    expect(on).toContain("«Субагенты»");
+    expect(on).toContain(base);
+  });
+
+  it("keeps the non-Ультра output byte-identical to base + project instructions", () => {
+    const pi = { file: "AGENTS.md", content: "do the thing" };
+    const plain = composeSystemAppend({ base, ultra: false });
+    expect(plain).toBe(base);
+
+    const withPi = composeSystemAppend({ base, ultra: false, projectInstructions: pi });
+    expect(withPi).toBe(
+      `${base}\n\nProject instructions from AGENTS.md (checked into this repository):\ndo the thing`,
+    );
+    // Project instructions stay LAST even when the Ультра note sits between them.
+    const ultraPi = composeSystemAppend({ base, ultra: true, projectInstructions: pi });
+    expect(ultraPi.indexOf("/workflows")).toBeLessThan(ultraPi.indexOf("do the thing"));
+    expect(ultraPi.endsWith("do the thing")).toBe(true);
   });
 });
 

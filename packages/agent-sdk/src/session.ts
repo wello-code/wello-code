@@ -359,6 +359,45 @@ const PREVIEW_SYSTEM_APPEND = [
 const SYSTEM_APPEND = `${ASK_SYSTEM_APPEND}\n\n${SUBAGENT_SYSTEM_APPEND}\n\n${WEB_SEARCH_SYSTEM_APPEND}\n\n${PREVIEW_SYSTEM_APPEND}`;
 
 /**
+ * Added ONLY in «Ультра». The engine's native ultracode directive is written for
+ * the Claude Code CLI, where `/workflows` shows a running workflow — so the model
+ * ends a turn telling the user to «смотреть прогресс через /workflows». That
+ * command does not exist in this desktop app, and users reported chasing it
+ * (2026-10). This note corrects the one fact that differs: where progress lives.
+ */
+const ULTRA_SYSTEM_APPEND = [
+  "You are running inside the Wello Code desktop app, not a terminal or CLI, and it",
+  "has no `/workflows` command. Never tell the user to run `/workflows` (or any other",
+  "slash command) to watch a Workflow or see its progress — it does not exist here and",
+  "only sends them chasing a dead end.",
+  "A Workflow you launch, and any background subagents, report their live progress in",
+  "the app's «Субагенты» panel, and the user gets a notification when a background run",
+  "finishes. If the user asks how to follow along, point them to the «Субагенты» panel.",
+].join(" ");
+
+/**
+ * Assembles the system-prompt append: the always-on guidance and this run's git /
+ * memory block (passed in as `base`), then the «Ультра» correction when that mode
+ * is on, then the repo's own instructions last. Kept pure so the «Ультра» note is
+ * covered by a test; the non-Ультра result is byte-identical to the old inline form.
+ */
+export function composeSystemAppend(parts: {
+  base: string;
+  ultra: boolean;
+  projectInstructions?: { file: string; content: string } | null;
+}): string {
+  const blocks = [parts.base];
+  if (parts.ultra) blocks.push(ULTRA_SYSTEM_APPEND);
+  if (parts.projectInstructions) {
+    blocks.push(
+      `Project instructions from ${parts.projectInstructions.file} ` +
+        `(checked into this repository):\n${parts.projectInstructions.content}`,
+    );
+  }
+  return blocks.join("\n\n");
+}
+
+/**
  * The project-memory block of the system prompt: the current notes (when any)
  * plus the update contract. Whole-text replace keeps the notes self-compacting;
  * the guidance keeps them NOTES (decisions, conventions, gotchas), not logs.
@@ -434,8 +473,10 @@ export function formatPreviewLook(outcome: PreviewLookOutcome | null): {
  * the flag-settings layer (probed live 2026-07-14 through the Wello gateway):
  * the engine injects its own standing directive («Ultracode is on: … use the
  * Workflow tool on every substantive task») and the Workflow orchestration tool
- * scripts agent()/parallel()/pipeline() fleets. No prompt-side directive of ours
- * is needed anymore — the old ULTRA_SYSTEM_APPEND is retired in favor of this.
+ * scripts agent()/parallel()/pipeline() fleets. Enabling orchestration needs no
+ * prompt directive from us; ULTRA_SYSTEM_APPEND (added only in this mode) is a
+ * small CORRECTIVE note, not an enabler — it stops the model pointing users at a
+ * `/workflows` command the desktop app lacks (that lives in the CLI).
  * `enableWorkflows` is set explicitly because its default is plan-gated.
  */
 const ULTRA_SETTINGS: Settings = { ultracode: true, enableWorkflows: true };
@@ -1388,10 +1429,11 @@ export class SdkAgentSession {
     // Self-injected project instructions (AGENTS.md): the engine only loads
     // CLAUDE.md natively, so the runtime reads AGENTS.md and appends it here.
     const baseAppend = `${SYSTEM_APPEND}\n\n${githubSystemAppend(req.github, Boolean(req.gitEnv))}\n\n${projectMemoryAppend(req.projectMemory)}`;
-    const systemAppend = req.projectInstructions
-      ? `${baseAppend}\n\nProject instructions from ${req.projectInstructions.file} ` +
-        `(checked into this repository):\n${req.projectInstructions.content}`
-      : baseAppend;
+    const systemAppend = composeSystemAppend({
+      base: baseAppend,
+      ultra,
+      projectInstructions: req.projectInstructions,
+    });
     const options: Options = {
       cwd: req.workspacePath,
       model,
