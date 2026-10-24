@@ -41,7 +41,7 @@ describe("modelAvailability (picker health marks)", () => {
  * decides whether its models are in the picker is the status, not this build.
  */
 describe("the stable shelf", () => {
-  const STABLE = ["claude-opus-5.5-stable", "gpt-6.1-sol-stable"];
+  const STABLE = ["claude-opus-5.5-stable", "claude-sonnet-5.5-stable", "gpt-6.1-sol-stable"];
   const ordinary = MODELS.filter((m) => m.shelf !== "stable").map((m) => m.id);
   const everythingUp = Object.fromEntries(MODELS.map((m) => [m.id, "available"]));
 
@@ -64,11 +64,13 @@ describe("the stable shelf", () => {
   });
 
   it("is not listed while the service hides it, whatever the availability says", () => {
-    const hidden = { ...everythingUp, "claude-opus-5.5-stable": STATUS_HIDDEN, "gpt-6.1-sol-stable": STATUS_HIDDEN };
+    const hidden = Object.fromEntries(
+      Object.keys(everythingUp).map((id) => [id, STABLE.includes(id) ? STATUS_HIDDEN : "available"]),
+    );
     expect(listedModels(hidden).map((m) => m.id)).toEqual(ordinary);
     // One of the two can be on without the other.
     const half = { ...everythingUp, "gpt-6.1-sol-stable": STATUS_HIDDEN };
-    expect(listedModels(half).map((m) => m.id)).toEqual([...ordinary, "claude-opus-5.5-stable"]);
+    expect(listedModels(half).map((m) => m.id)).toEqual([...ordinary, "claude-opus-5.5-stable", "claude-sonnet-5.5-stable"]);
   });
 
   it("tells 'not offered' from 'not answering'", () => {
@@ -247,13 +249,21 @@ describe("the picker and the fallback agree", () => {
     // real agent turn of this app (read a file, write a file, run a command):
     // from the second step on, both read the whole earlier conversation back
     // from the cache instead of paying for it again.
+    //
+    // Haiku 5.5, Sonnet 5.5 and both GLM 5.3 joined on 2026-10-24 on the same
+    // bar and the same three-tool turn: every step after the first read the
+    // earlier conversation back from the cache.
     expect(MODELS.map((m) => m.id)).toEqual([
       "claude-opus-5",
+      "claude-haiku-5.5",
       "gpt-5.6-luna",
       "gpt-5.6-terra",
       "gpt-5.6-sol",
       "gpt-6-astra",
+      "glm-5.3-flash",
+      "glm-5.3-flash-uncensored",
       "claude-opus-5.5-stable",
+      "claude-sonnet-5.5-stable",
       "gpt-6.1-sol-stable",
     ]);
   });

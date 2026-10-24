@@ -33,6 +33,9 @@ export interface PickerModel {
  */
 export const MODELS: PickerModel[] = [
   { id: "claude-opus-5", label: "Opus 5", hint: "Новейший Opus, максимум качества" },
+  // The lightest Claude: a turn on it draws a fraction of what the same turn on
+  // Opus 5 does, which is the whole reason to offer it.
+  { id: "claude-haiku-5.5", label: "Haiku 5.5", hint: "Самая быстрая и экономная, лимит тратится в разы медленнее" },
   { id: "gpt-5.6-luna", label: "GPT Luna", hint: "Самая быстрая и дешёвая" },
   { id: "gpt-5.6-terra", label: "GPT Terra", hint: "Дешевле Claude, с размышлениями" },
   { id: "gpt-5.6-sol", label: "GPT Sol", hint: "Самая мощная в линейке GPT" },
@@ -42,6 +45,10 @@ export const MODELS: PickerModel[] = [
   // fifth of the time and reads it as the product cheating them, so the warning
   // belongs in the picker itself rather than in a changelog nobody opens.
   { id: "gpt-6-astra", label: "GPT Astra", hint: "Самая сильная, но расходует лимит впятеро быстрее" },
+  // Flash cannot see images: the service drops them without a word, so the hint
+  // says it before someone attaches a screenshot and waits for an answer about it.
+  { id: "glm-5.3-flash", label: "GLM 5.3 Flash", hint: "Быстрая и недорогая, не видит картинки" },
+  { id: "glm-5.3-flash-uncensored", label: "GLM 5.3 Flash Uncensored", hint: "Без фильтров контента, думает дольше" },
   // The stable shelf. Last on purpose: the default is the first entry, and nobody
   // should land on a model that draws the allowance several times faster without
   // having chosen it. Each hint says what the choice costs, for the same reason
@@ -52,6 +59,12 @@ export const MODELS: PickerModel[] = [
     id: "claude-opus-5.5-stable",
     label: "Opus 5.5",
     hint: "Расходует лимит в несколько раз быстрее",
+    shelf: "stable",
+  },
+  {
+    id: "claude-sonnet-5.5-stable",
+    label: "Sonnet 5.5",
+    hint: "Расходует лимит вдвое медленнее Opus 5.5",
     shelf: "stable",
   },
   {

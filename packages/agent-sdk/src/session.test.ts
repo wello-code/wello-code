@@ -131,6 +131,10 @@ describe("engineModelId", () => {
     expect(engineModelId("claude-opus-4-8")).toBe("claude-opus-4-8[1m]");
     expect(engineModelId("claude-fable-5")).toBe("claude-fable-5[1m]");
     expect(engineModelId("claude-opus-5.5-stable")).toBe("claude-opus-5.5-stable[1m]");
+    expect(engineModelId("claude-sonnet-5.5-stable")).toBe("claude-sonnet-5.5-stable[1m]");
+    expect(engineModelId("claude-haiku-5.5")).toBe("claude-haiku-5.5[1m]");
+    expect(engineModelId("glm-5.3-flash")).toBe("glm-5.3-flash[1m]");
+    expect(engineModelId("glm-5.3-flash-uncensored")).toBe("glm-5.3-flash-uncensored[1m]");
   });
 
   it("leaves 200K models and unknown ids untouched", () => {
