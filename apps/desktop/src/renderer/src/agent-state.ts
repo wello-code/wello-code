@@ -50,10 +50,14 @@ const MAX_SUBAGENT_ENTRIES = 500;
 export interface SubagentInfo {
   id: string;
   title: string;
-  status: "running" | "done" | "failed";
+  status: "running" | "done" | "failed" | "stopped";
   transcript: { entry: "text" | "tool"; text: string }[];
   startedAt: string;
   finishedAt: string | null;
+  /** When it last did something visible: «молчит N минут» beats a static spinner. */
+  lastActivityAt?: string;
+  /** A workflow agent still waiting for its turn: it has not started at all. */
+  queued?: boolean;
 }
 
 export interface AgentState {
@@ -195,7 +199,7 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
       pending: null,
       question: null,
       githubConnect: null,
-      subagents: finalizeSubagents(state.subagents, now),
+      subagents: finalizeSubagents(state.subagents, now, "stopped"),
       plan: finalizePlan(state.plan, "pending"),
       elapsedMs: state.startedAt ? Math.max(0, Date.parse(now) - Date.parse(state.startedAt)) : null,
       items: [...state.items, note(crypto.randomUUID(), "Запуск отменён", "cancelled")],
@@ -282,12 +286,57 @@ function elapsed(startedAt: string | null, event: AgentEvent): number | null {
 /**
  * A run reached a terminal state: no subagent may stay "running" forever — the
  * engine will not deliver their results anymore (cancel/failure kills them too).
+ * The outcome says what really happened to them: an agent cut off by a failed run
+ * did not finish, and a green tick on it hid that from the person reading the list.
  */
-function finalizeSubagents(subagents: SubagentInfo[], timestamp: string): SubagentInfo[] {
+function finalizeSubagents(
+  subagents: SubagentInfo[],
+  timestamp: string,
+  outcome: "done" | "failed" | "stopped",
+): SubagentInfo[] {
   if (!subagents.some((s) => s.status === "running")) return subagents;
   return subagents.map((s) =>
-    s.status === "running" ? { ...s, status: "done", finishedAt: timestamp } : s,
+    s.status === "running" ? { ...s, status: outcome, finishedAt: timestamp } : s,
   );
+}
+
+/** Compact RU duration for the roster ("5с" / "14м" / "1ч 3м"). */
+export function fmtElapsed(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}с`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}м`;
+  return `${Math.floor(m / 60)}ч ${m % 60}м`;
+}
+
+/** Quiet for this long, the agent's line says so instead of its last step. */
+export const QUIET_AFTER_MS = 60_000;
+
+/**
+ * What a running agent is up to. A model can reason for minutes without a visible
+ * step, so one static word cannot tell a thinking agent from a dead one: the last
+ * real step, or how long it has been quiet. While a question or a permission card
+ * waits in the chat the quiet is usually that card (agents launched alongside it
+ * do not even start until it is answered), and the person is the one to act.
+ */
+export function runningLine(agent: SubagentInfo, now: number, awaitingPerson = false): string {
+  if (agent.queued) return "В очереди";
+  const quiet = now - Date.parse(agent.lastActivityAt ?? agent.startedAt);
+  const entry = agent.transcript[agent.transcript.length - 1];
+  const last = entry?.text.trim().split("\n")[0];
+  if (quiet >= QUIET_AFTER_MS) {
+    if (awaitingPerson) return `Ждёт вашего ответа в чате, новых шагов нет ${fmtElapsed(quiet)}`;
+    // After a command the quiet may be the command itself, not the model thinking.
+    return entry?.entry === "tool"
+      ? `Новых шагов нет ${fmtElapsed(quiet)}, последний: ${last}`
+      : `Думает, новых шагов нет ${fmtElapsed(quiet)}`;
+  }
+  return last || "Думает…";
+}
+
+/** A verdict that a late transcript line must not overturn. */
+function settled(agent: SubagentInfo, runLive: boolean): boolean {
+  return agent.status === "failed" || agent.status === "stopped" || !runLive;
 }
 
 /**
@@ -329,7 +378,7 @@ function applyEvent(prev: AgentState, event: AgentEvent): AgentState {
           pending: null,
           question: null,
           githubConnect: null,
-          subagents: finalizeSubagents(state.subagents, event.timestamp),
+          subagents: finalizeSubagents(state.subagents, event.timestamp, "stopped"),
           plan: finalizePlan(state.plan, "pending"),
           elapsedMs: elapsed(state.startedAt, event),
           items: [...state.items, note(event.id, "Запуск отменён", "cancelled")],
@@ -473,6 +522,8 @@ function applyEvent(prev: AgentState, event: AgentEvent): AgentState {
           transcript,
           startedAt: a.startedAt ? new Date(a.startedAt).toISOString() : event.timestamp,
           finishedAt: finished && a.updatedAt ? new Date(a.updatedAt).toISOString() : null,
+          ...(a.updatedAt ? { lastActivityAt: new Date(a.updatedAt).toISOString() } : {}),
+          ...(!a.startedAt && !finished ? { queued: true } : {}),
         };
       });
       return {
@@ -490,9 +541,12 @@ function applyEvent(prev: AgentState, event: AgentEvent): AgentState {
             ? {
                 ...s,
                 // A growing transcript proves the agent is alive — heal a premature
-                // "done" (e.g. a settle signal the engine sent out of order).
-                status: s.status === "failed" ? s.status : "running",
-                finishedAt: s.status === "failed" ? s.finishedAt : null,
+                // "done" (e.g. a settle signal the engine sent out of order). Only
+                // while the run lives: after it ended nothing will ever settle this
+                // agent again, and «работает» would stay on the screen for good.
+                status: settled(s, state.running) ? s.status : "running",
+                finishedAt: settled(s, state.running) ? s.finishedAt : null,
+                lastActivityAt: event.timestamp,
                 transcript: [...s.transcript, { entry, text }].slice(-MAX_SUBAGENT_ENTRIES),
               }
             : s,
@@ -536,7 +590,7 @@ function applyEvent(prev: AgentState, event: AgentEvent): AgentState {
         pending: null,
         question: null,
         githubConnect: null,
-        subagents: finalizeSubagents(state.subagents, event.timestamp),
+        subagents: finalizeSubagents(state.subagents, event.timestamp, "done"),
         plan: finalizePlan(state.plan, "completed"),
         elapsedMs: elapsed(state.startedAt, event),
         lastFailure: null,
@@ -548,7 +602,7 @@ function applyEvent(prev: AgentState, event: AgentEvent): AgentState {
         pending: null,
         question: null,
         githubConnect: null,
-        subagents: finalizeSubagents(state.subagents, event.timestamp),
+        subagents: finalizeSubagents(state.subagents, event.timestamp, "failed"),
         plan: finalizePlan(state.plan, "pending"),
         elapsedMs: elapsed(state.startedAt, event),
         items: [...state.items, note(event.id, event.data.message, "danger")],

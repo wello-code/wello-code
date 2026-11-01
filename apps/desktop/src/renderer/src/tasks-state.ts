@@ -200,8 +200,15 @@ export function tasksReducer(state: TasksState, action: TasksAction): TasksState
               pending: null,
               question: null,
               githubConnect: null,
+              // Died with the app, unfinished. The clock stops where they went quiet.
               subagents: (t.agent.subagents ?? []).map((s) =>
-                s.status === "running" ? { ...s, status: "done" as const } : s,
+                s.status === "running"
+                  ? {
+                      ...s,
+                      status: "stopped" as const,
+                      finishedAt: s.finishedAt ?? s.lastActivityAt ?? s.startedAt,
+                    }
+                  : s,
               ),
               // Snapshots from builds without the context gauge.
               contextUsedTokens: t.agent.contextUsedTokens ?? null,

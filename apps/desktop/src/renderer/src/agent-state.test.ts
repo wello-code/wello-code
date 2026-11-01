@@ -5,7 +5,9 @@ import {
   autoDenialText,
   describeCurrentAction,
   initialAgentState,
+  runningLine,
   type AgentState,
+  type SubagentInfo,
 } from "./agent-state";
 
 let seq = 0;
@@ -403,6 +405,116 @@ describe("agentReducer · subagent transcript growth", () => {
     expect(log.length).toBe(500);
     expect(log[log.length - 1]!.text).toBe("шаг 699"); // the newest survives
     expect(log[0]!.text).toBe("шаг 200"); // the oldest were dropped
+  });
+});
+
+describe("agentReducer · what happened to an agent is what the list says", () => {
+  const started = (): AgentState =>
+    apply(
+      initialAgentState,
+      ev("tool.requested", {
+        id: "toolu_sub",
+        runId: "r1",
+        intent: { kind: "run_command", argv: ["Task"], cwd: "/w" },
+        summary: "Subagent · разведка",
+        status: "running",
+        risk: "low",
+        idempotencyKey: "toolu_sub",
+      }),
+    );
+
+  it("an agent cut off by a failed run did not finish", () => {
+    const s = apply(started(), ev("run.failed", { code: "x", message: "сбой", retryable: true }));
+    expect(s.subagents[0]!.status).toBe("failed");
+  });
+
+  it("an agent the person stopped is stopped, both ways the stop can arrive", () => {
+    const local = agentReducer(started(), { type: "cancelLocal" });
+    expect(local.subagents[0]!.status).toBe("stopped");
+    const engine = apply(started(), ev("run.status_changed", { from: "working", to: "cancelled" }));
+    expect(engine.subagents[0]!.status).toBe("stopped");
+  });
+
+  it("a finished run still ends its agents as done", () => {
+    const s = apply(started(), ev("run.completed", { summary: "ok" }));
+    expect(s.subagents[0]!.status).toBe("done");
+  });
+
+  it("a late transcript line after the run does not bring an agent back to life", () => {
+    // Nothing would ever settle it again: it would read «работает» forever.
+    const ended = apply(started(), ev("run.completed", { summary: "ok" }));
+    const late = apply(
+      { ...ended, running: false },
+      ev("subagent.message", { toolUseId: "toolu_sub", text: "хвост", entry: "text" }),
+    );
+    expect(late.subagents[0]!.status).toBe("done");
+    expect(late.subagents[0]!.finishedAt).not.toBeNull();
+  });
+
+  it("every step of a running agent is the moment it was last heard from", () => {
+    const s = apply(
+      { ...started(), running: true },
+      ev("subagent.message", { toolUseId: "toolu_sub", text: "шаг", entry: "text" }, "2026-11-01T15:00:00.000Z"),
+    );
+    expect(s.subagents[0]!.status).toBe("running");
+    expect(s.subagents[0]!.lastActivityAt).toBe("2026-11-01T15:00:00.000Z");
+  });
+});
+
+describe("runningLine · what a running agent is doing, in words", () => {
+  const at = (iso: string) => Date.parse(iso);
+  const agent = (over: Partial<SubagentInfo> = {}): SubagentInfo => ({
+    id: "a",
+    title: "t",
+    status: "running",
+    transcript: [],
+    startedAt: "2026-11-01T15:00:00.000Z",
+    finishedAt: null,
+    ...over,
+  });
+
+  it("a fresh agent is thinking", () => {
+    expect(runningLine(agent(), at("2026-11-01T15:00:10.000Z"))).toBe("Думает…");
+  });
+
+  it("shows the first line of its last step", () => {
+    const a = agent({
+      lastActivityAt: "2026-11-01T15:00:30.000Z",
+      transcript: [{ entry: "tool", text: "Read src/mock.ts\nвторая строка" }],
+    });
+    expect(runningLine(a, at("2026-11-01T15:00:40.000Z"))).toBe("Read src/mock.ts");
+  });
+
+  it("past a minute of quiet it says how long, counted from the last step", () => {
+    const a = agent({
+      lastActivityAt: "2026-11-01T15:01:00.000Z",
+      transcript: [{ entry: "text", text: "Сейчас посчитаю" }],
+    });
+    expect(runningLine(a, at("2026-11-01T15:04:00.000Z"))).toBe("Думает, новых шагов нет 3м");
+  });
+
+  it("after a command the quiet may be the command, so it does not claim thinking", () => {
+    const a = agent({
+      lastActivityAt: "2026-11-01T15:01:00.000Z",
+      transcript: [{ entry: "tool", text: "npm run build" }],
+    });
+    expect(runningLine(a, at("2026-11-01T15:06:00.000Z"))).toBe(
+      "Новых шагов нет 5м, последний: npm run build",
+    );
+  });
+
+  it("an old chat without the field counts from the start", () => {
+    expect(runningLine(agent(), at("2026-11-01T15:02:00.000Z"))).toBe("Думает, новых шагов нет 2м");
+  });
+
+  it("an agent still queued has not started, so it is not thinking", () => {
+    expect(runningLine(agent({ queued: true }), at("2026-11-01T15:03:00.000Z"))).toBe("В очереди");
+  });
+
+  it("with a card waiting in the chat, the person is who it is waiting for", () => {
+    expect(runningLine(agent(), at("2026-11-01T15:17:00.000Z"), true)).toBe(
+      "Ждёт вашего ответа в чате, новых шагов нет 17м",
+    );
   });
 });
 

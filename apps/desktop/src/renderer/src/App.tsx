@@ -3750,6 +3750,9 @@ ${t.workspaceName}` : t.title
           taskId={activeTask?.id ?? ""}
           refreshKey={refreshKey}
           subagents={activeTask?.agent.subagents ?? []}
+          awaitingPerson={Boolean(
+            activeTask?.agent.question ?? activeTask?.agent.pending ?? activeTask?.agent.githubConnect,
+          )}
           model={model}
           onCaptureScreenshot={attachScreenshot}
           onOpenFile={openFileTab}

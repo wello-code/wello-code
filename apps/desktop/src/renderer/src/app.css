@@ -4859,6 +4859,9 @@ body.is-row-resizing {
 .agents__avatar-badge--failed {
   background: var(--agent-error);
 }
+.agents__avatar-badge--stopped {
+  background: var(--text-muted);
+}
 /* «Активные · N» section: a small live dot in front. */
 .agents__pulse {
   display: inline-block;

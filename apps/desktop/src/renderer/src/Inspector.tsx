@@ -6,7 +6,7 @@ import type {
   PreviewViewNavState,
   WorkspaceFile,
 } from "../../shared/ipc-api";
-import type { SubagentInfo } from "./agent-state";
+import { QUIET_AFTER_MS, fmtElapsed, runningLine, type SubagentInfo } from "./agent-state";
 import { highlight, languageForPath } from "./highlight";
 import { Icon, type IconName } from "./Icon";
 import { Markdown } from "./Markdown";
@@ -643,18 +643,13 @@ function AgentAvatar({ agent }: { agent: SubagentInfo }) {
         <span className="agents__avatar-badge agents__avatar-badge--failed">
           <Icon name="x" size={7} />
         </span>
+      ) : agent.status === "stopped" ? (
+        <span className="agents__avatar-badge agents__avatar-badge--stopped">
+          <Icon name="x" size={7} />
+        </span>
       ) : null}
     </span>
   );
-}
-
-/** Compact RU duration for the roster ("5с" / "14м" / "1ч 3м"). */
-function fmtElapsed(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000));
-  if (s < 60) return `${s}с`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}м`;
-  return `${Math.floor(m / 60)}ч ${m % 60}м`;
 }
 
 /** How long an agent ran (done/failed) or has been running so far (live). */
@@ -664,7 +659,13 @@ function agentTiming(agent: SubagentInfo, now: number): string {
   return fmtElapsed(end - start);
 }
 
-export function AgentsPanel({ subagents }: { subagents: SubagentInfo[] }) {
+export function AgentsPanel({
+  subagents,
+  awaitingPerson,
+}: {
+  subagents: SubagentInfo[];
+  awaitingPerson: boolean;
+}) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = subagents.find((s) => s.id === selectedId) ?? null;
 
@@ -713,7 +714,9 @@ export function AgentsPanel({ subagents }: { subagents: SubagentInfo[] }) {
               ? `выполняется · ${agentTiming(selected, now)}`
               : selected.status === "failed"
                 ? `ошибка · ${agentTiming(selected, now)}`
-                : agentTiming(selected, now)}
+                : selected.status === "stopped"
+                  ? `остановлен · ${agentTiming(selected, now)}`
+                  : agentTiming(selected, now)}
           </span>
           <span className="inspector__spacer" />
           <button
@@ -746,7 +749,11 @@ export function AgentsPanel({ subagents }: { subagents: SubagentInfo[] }) {
           {selected.status === "running" ? (
             <div className="agents__tool">
               <span className="spinner" />
-              <span className="muted">Работает…</span>
+              <span className="muted">
+                {now - Date.parse(selected.lastActivityAt ?? selected.startedAt) >= QUIET_AFTER_MS
+                  ? runningLine(selected, now, awaitingPerson)
+                  : "Работает…"}
+              </span>
             </div>
           ) : null}
         </div>
@@ -771,11 +778,17 @@ export function AgentsPanel({ subagents }: { subagents: SubagentInfo[] }) {
             </p>
           ) : null}
           {running.map((s) => (
-            <AgentRow key={s.id} agent={s} now={now} onOpen={() => setSelectedId(s.id)} />
+            <AgentRow
+              key={s.id}
+              agent={s}
+              now={now}
+              awaitingPerson={awaitingPerson}
+              onOpen={() => setSelectedId(s.id)}
+            />
           ))}
-          {finished.length > 0 ? <p className="agents__section">Готово · {finished.length}</p> : null}
+          {finished.length > 0 ? <p className="agents__section">Завершены · {finished.length}</p> : null}
           {finished.map((s) => (
-            <AgentRow key={s.id} agent={s} now={now} onOpen={() => setSelectedId(s.id)} />
+            <AgentRow key={s.id} agent={s} now={now} awaitingPerson={false} onOpen={() => setSelectedId(s.id)} />
           ))}
         </div>
       )}
@@ -783,14 +796,26 @@ export function AgentsPanel({ subagents }: { subagents: SubagentInfo[] }) {
   );
 }
 
-function AgentRow({ agent, now, onOpen }: { agent: SubagentInfo; now: number; onOpen: () => void }) {
+function AgentRow({
+  agent,
+  now,
+  awaitingPerson,
+  onOpen,
+}: {
+  agent: SubagentInfo;
+  now: number;
+  awaitingPerson: boolean;
+  onOpen: () => void;
+}) {
   const lastText = [...agent.transcript].reverse().find((t) => t.entry === "text")?.text ?? "";
   const preview =
     agent.status === "running"
-      ? "Выполнение…"
+      ? runningLine(agent, now, awaitingPerson)
       : agent.status === "failed"
         ? lastText || "Не удалось завершить"
-        : lastText || "Готово";
+        : agent.status === "stopped"
+          ? lastText || "Остановлен, не закончил"
+          : lastText || "Готово";
   return (
     <button className="agents__row" onClick={onOpen}>
       <AgentAvatar agent={agent} />
@@ -800,7 +825,15 @@ function AgentRow({ agent, now, onOpen }: { agent: SubagentInfo; now: number; on
       </span>
       <span
         className={`agents__meta agents__meta--${agent.status}`}
-        title={agent.status === "running" ? "Выполняется" : agent.status === "failed" ? "Ошибка" : "Завершено"}
+        title={
+          agent.status === "running"
+            ? "Выполняется"
+            : agent.status === "failed"
+              ? "Ошибка"
+              : agent.status === "stopped"
+                ? "Остановлен"
+                : "Завершено"
+        }
       >
         {agentTiming(agent, now)}
       </span>

@@ -66,6 +66,7 @@ export function PanelDock({
   taskId,
   refreshKey,
   subagents,
+  awaitingPerson,
   model,
   onCaptureScreenshot,
   onOpenFile,
@@ -83,6 +84,8 @@ export function PanelDock({
   taskId: string;
   refreshKey: number;
   subagents: SubagentInfo[];
+  /** The run is stopped on a question or a permission card in the chat. */
+  awaitingPerson: boolean;
   /** The composer's current model — the commit-message generator uses it. */
   model: string;
   onCaptureScreenshot: (path: string) => void;
@@ -336,7 +339,7 @@ export function PanelDock({
                   onSendReview={onSendReview}
                 />
               ) : id === "agents" ? (
-                <AgentsPanel subagents={subagents} />
+                <AgentsPanel subagents={subagents} awaitingPerson={awaitingPerson} />
               ) : id === "preview" ? (
                 <PreviewPane
                   key={workspacePath}
