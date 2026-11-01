@@ -710,7 +710,9 @@ export function AgentsPanel({
           <AgentAvatar agent={selected} />
           <span className="agents__name">{selected.title}</span>
           <span className={`agents__meta agents__meta--${selected.status}`}>
-            {selected.status === "running"
+            {selected.queued
+              ? `в очереди · ${agentTiming(selected, now)}`
+              : selected.status === "running"
               ? `выполняется · ${agentTiming(selected, now)}`
               : selected.status === "failed"
                 ? `ошибка · ${agentTiming(selected, now)}`
@@ -750,7 +752,8 @@ export function AgentsPanel({
             <div className="agents__tool">
               <span className="spinner" />
               <span className="muted">
-                {now - Date.parse(selected.lastActivityAt ?? selected.startedAt) >= QUIET_AFTER_MS
+                {selected.queued ||
+                now - Date.parse(selected.lastActivityAt ?? selected.startedAt) >= QUIET_AFTER_MS
                   ? runningLine(selected, now, awaitingPerson)
                   : "Работает…"}
               </span>
