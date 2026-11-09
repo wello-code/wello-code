@@ -197,6 +197,8 @@ describe("GIT_SYSTEM_APPEND (our git rules, stated once instead of the engine's)
     expect(GIT_SYSTEM_APPEND).toContain("--no-verify");
     expect(GIT_SYSTEM_APPEND).toMatch(/force-push/);
     expect(GIT_SYSTEM_APPEND).toMatch(/Commit only when the user asks/);
+    expect(GIT_SYSTEM_APPEND).toContain("reset --hard");
+    expect(GIT_SYSTEM_APPEND).toContain("rebase -i");
   });
 
   it("has nothing in it that could differ between two turns", () => {

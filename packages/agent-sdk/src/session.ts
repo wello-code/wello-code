@@ -376,6 +376,10 @@ export const GIT_SYSTEM_APPEND = [
   "change git config, never skip hooks (--no-verify), and never force-push or rewrite",
   "history that was already pushed unless the user explicitly asks; if a hook fails,",
   "fix the cause and make a new commit instead of amending. Push only when asked.",
+  "Never throw away uncommitted work (`reset --hard`, `checkout -- .`, `restore .`,",
+  "`clean -f`, `branch -D`) unless the user asked for exactly that. There is no",
+  "terminal to answer prompts: never use interactive flags such as `rebase -i` or",
+  "`add -i`, and pass the commit message on the command line.",
 ].join(" ");
 
 const SYSTEM_APPEND = `${ASK_SYSTEM_APPEND}\n\n${SUBAGENT_SYSTEM_APPEND}\n\n${WEB_SEARCH_SYSTEM_APPEND}\n\n${PREVIEW_SYSTEM_APPEND}\n\n${GIT_SYSTEM_APPEND}`;
