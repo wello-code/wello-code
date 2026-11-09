@@ -5992,8 +5992,18 @@ function ModelSelect({
             ) : null}
             {shelves ? (
               <>
-                <p className="modelsel__caption">Стабильные · ровнее в часы пик</p>
-                {shelves.stable.map(item)}
+                {shelves.flagship.length > 0 ? (
+                  <>
+                    <p className="modelsel__caption">Самая сильная · для сложных задач</p>
+                    {shelves.flagship.map(item)}
+                  </>
+                ) : null}
+                {shelves.stable.length > 0 ? (
+                  <>
+                    <p className="modelsel__caption">Стабильные · ровнее в часы пик</p>
+                    {shelves.stable.map(item)}
+                  </>
+                ) : null}
                 <p className="modelsel__caption">Дешёвые · экономят лимит</p>
                 {shelves.ordinary.map(item)}
               </>

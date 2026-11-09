@@ -42,7 +42,8 @@ describe("modelAvailability (picker health marks)", () => {
  */
 describe("the stable shelf", () => {
   const STABLE = ["claude-opus-5.5-stable", "claude-sonnet-5.5-stable", "gpt-6.1-sol-stable"];
-  const ordinary = MODELS.filter((m) => m.shelf !== "stable").map((m) => m.id);
+  const FLAGSHIP = "claude-fable-5.2";
+  const ordinary = MODELS.filter((m) => !m.shelf).map((m) => m.id);
   const everythingUp = Object.fromEntries(MODELS.map((m) => [m.id, "available"]));
 
   it("is two models, marked as such and nothing else is", () => {
@@ -65,12 +66,17 @@ describe("the stable shelf", () => {
 
   it("is not listed while the service hides it, whatever the availability says", () => {
     const hidden = Object.fromEntries(
-      Object.keys(everythingUp).map((id) => [id, STABLE.includes(id) ? STATUS_HIDDEN : "available"]),
+      Object.keys(everythingUp).map((id) => [id, STABLE.includes(id) || id === FLAGSHIP ? STATUS_HIDDEN : "available"]),
     );
     expect(listedModels(hidden).map((m) => m.id)).toEqual(ordinary);
     // One of the two can be on without the other.
     const half = { ...everythingUp, "gpt-6.1-sol-stable": STATUS_HIDDEN };
-    expect(listedModels(half).map((m) => m.id)).toEqual([...ordinary, "claude-opus-5.5-stable", "claude-sonnet-5.5-stable"]);
+    expect(listedModels(half).map((m) => m.id)).toEqual([
+      ...ordinary,
+      "claude-opus-5.5-stable",
+      "claude-sonnet-5.5-stable",
+      FLAGSHIP,
+    ]);
   });
 
   it("tells 'not offered' from 'not answering'", () => {
@@ -115,8 +121,13 @@ describe("the stable shelf", () => {
 
   it("is drawn as its own group, first, and only when there is something in it", () => {
     const both = pickerShelves(listedModels(everythingUp))!;
+    expect(both.flagship.map((m) => m.id)).toEqual([FLAGSHIP]);
     expect(both.stable.map((m) => m.id)).toEqual(STABLE);
     expect(both.ordinary.map((m) => m.id)).toEqual(ordinary);
+    // The flagship alone still groups, and an empty stable shelf draws nothing.
+    const flagshipOnly = pickerShelves(listedModels({ ...Object.fromEntries(ordinary.map((id) => [id, "available"])), [FLAGSHIP]: "available" }))!;
+    expect(flagshipOnly.flagship.map((m) => m.id)).toEqual([FLAGSHIP]);
+    expect(flagshipOnly.stable).toEqual([]);
     // Nothing stable on offer: no groups at all, the picker looks as it always did.
     expect(pickerShelves(listedModels(null))).toBeNull();
   });
@@ -265,6 +276,10 @@ describe("the picker and the fallback agree", () => {
       "claude-opus-5.5-stable",
       "claude-sonnet-5.5-stable",
       "gpt-6.1-sol-stable",
+      // 2026-11-09, on the same bar: a real agent turn of this app's engine (read a
+      // file, fix a bug, write a file, run a command) read the whole earlier
+      // conversation back from the cache on every step.
+      "claude-fable-5.2",
     ]);
   });
 });

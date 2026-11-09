@@ -14,9 +14,11 @@ export interface PickerModel {
   hint: string;
   /**
    * Which shelf the model sits on. "stable" models answer more steadily at busy
-   * hours and draw the allowance faster; everything else is the ordinary shelf.
+   * hours and draw the allowance faster; "flagship" is the strongest model, which
+   * draws it the fastest of all without being any steadier; everything else is
+   * the ordinary shelf.
    */
-  shelf?: "stable";
+  shelf?: "stable" | "flagship";
 }
 
 /**
@@ -72,6 +74,14 @@ export const MODELS: PickerModel[] = [
     label: "GPT-6.1 Sol",
     hint: "Расходует лимит примерно как GPT Sol",
     shelf: "stable",
+  },
+  // The flagship, in a group of its own above the other two. Last in the list for
+  // the same reason as the stable shelf: nobody lands on it without choosing it.
+  {
+    id: "claude-fable-5.2",
+    label: "Fable 5.2",
+    hint: "Новейший флагман Claude, расходует лимит быстрее всех",
+    shelf: "flagship",
   },
 ];
 
@@ -162,21 +172,24 @@ export function listedModels(
     if (m.id === selected) return true;
     const said = statusOf(status, m.id);
     if (isHidden(said)) return false;
-    return m.shelf === "stable" ? said !== null : true;
+    // The flagship follows the stable rule: a service that has not heard of it
+    // refuses it, so silence means "not offered".
+    return m.shelf ? said !== null : true;
   });
 }
 
 /**
- * The same list in the two groups the picker draws, stable first. Null when no
- * stable model is listed: then there is nothing to group, and the picker looks
- * the way it always did.
+ * The same list in the groups the picker draws: flagship, stable, the rest. Null
+ * when neither of the first two is listed: then there is nothing to group, and
+ * the picker looks the way it always did.
  */
 export function pickerShelves(
   models: readonly PickerModel[],
-): { stable: PickerModel[]; ordinary: PickerModel[] } | null {
+): { flagship: PickerModel[]; stable: PickerModel[]; ordinary: PickerModel[] } | null {
+  const flagship = models.filter((m) => m.shelf === "flagship");
   const stable = models.filter((m) => m.shelf === "stable");
-  if (stable.length === 0) return null;
-  return { stable, ordinary: models.filter((m) => m.shelf !== "stable") };
+  if (flagship.length === 0 && stable.length === 0) return null;
+  return { flagship, stable, ordinary: models.filter((m) => !m.shelf) };
 }
 
 /**
