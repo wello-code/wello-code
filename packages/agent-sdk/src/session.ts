@@ -523,6 +523,15 @@ const ULTRA_SETTINGS: Settings = { ultracode: true, enableWorkflows: true };
  * the people who actually need it (a large codebase, a long document). The 1M
  * context itself is untouched either way — this is when to summarise, not how
  * much the model can hold.
+ *
+ * The default is also the FLOOR. The agent's own instructions and tool
+ * definitions take roughly 40K of every conversation, and the summary plus the
+ * files re-read after a compaction add another 25K or so, while the engine
+ * compacts well before the budget itself (it keeps room for the reply: about
+ * 67K on a 100K budget). That left a few thousand tokens of headroom: the conversation was
+ * compacted every couple of steps, the agent kept losing what it had just done
+ * and redoing it, and the plan went on the repeats. So a smaller budget than
+ * the default is raised to it rather than honoured.
  */
 const DEFAULT_AUTO_COMPACT_WINDOW_TOKENS = 200_000;
 
@@ -532,7 +541,8 @@ const DEFAULT_AUTO_COMPACT_WINDOW_TOKENS = 200_000;
  * turn — see GIT_SYSTEM_APPEND for why and for the rules we state instead.
  */
 export function runSettings(autoCompactWindow: number | undefined, ultra: boolean): Settings {
-  const budget = autoCompactWindow ?? DEFAULT_AUTO_COMPACT_WINDOW_TOKENS;
+  const asked = autoCompactWindow ?? DEFAULT_AUTO_COMPACT_WINDOW_TOKENS;
+  const budget = asked > 0 ? Math.max(asked, DEFAULT_AUTO_COMPACT_WINDOW_TOKENS) : asked;
   const compaction: Settings =
     budget > 0
       ? { autoCompactEnabled: true, autoCompactWindow: budget }

@@ -167,6 +167,13 @@ describe("runSettings (auto-compaction budget)", () => {
     expect(runSettings(400_000, false).autoCompactWindow).toBe(400_000);
   });
 
+  it("raises a budget below the default to it: a smaller one compacts every step", () => {
+    // The agent's own prompt and tools plus a fresh summary already fill most of
+    // 100K, so such a budget compacted in a loop and the work went round in circles.
+    expect(runSettings(100_000, false).autoCompactWindow).toBe(200_000);
+    expect(runSettings(1, false).autoCompactWindow).toBe(200_000);
+  });
+
   it("0 means NEVER compact — the full window is the point of a 1M model", () => {
     const s = runSettings(0, false);
     expect(s.autoCompactEnabled).toBe(false);

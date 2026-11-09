@@ -620,7 +620,6 @@ function GeneralPage({
                     persist({ ...settings, autoCompactWindow: Number(e.target.value) })
                   }
                 >
-                  <option value="100000">100К токенов — экономно</option>
                   <option value="200000">200К токенов — по умолчанию</option>
                   <option value="400000">400К токенов</option>
                   <option value="0">Не сжимать (всё окно модели)</option>

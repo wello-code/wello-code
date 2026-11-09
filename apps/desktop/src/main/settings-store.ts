@@ -30,6 +30,21 @@ function booleanMap(raw: unknown): Record<string, boolean> {
   return out;
 }
 
+/**
+ * The saved auto-compaction budget, or the default. 0 is a real value here
+ * ("never compact"). A budget below the default is not offered any more, and one
+ * saved by an older version is raised to the default — see runSettings in
+ * agent-sdk for why such a budget cannot work.
+ */
+function savedCompactWindow(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0)
+    return DEFAULT_AUTO_COMPACT_WINDOW;
+  const budget = Math.round(raw);
+  return budget === 0 || budget >= DEFAULT_AUTO_COMPACT_WINDOW
+    ? budget
+    : DEFAULT_AUTO_COMPACT_WINDOW;
+}
+
 function settingsPath(): string {
   return join(app.getPath("userData"), "wello-settings.json");
 }
@@ -53,11 +68,7 @@ export async function loadSettings(): Promise<AppSettings> {
       gitPrDraftDefault: parsed.gitPrDraftDefault !== false, // default on
       gitPrInstructions:
         typeof parsed.gitPrInstructions === "string" ? parsed.gitPrInstructions : "",
-      // 0 is a real value here ("never compact"), so only a non-number falls back.
-      autoCompactWindow:
-        typeof parsed.autoCompactWindow === "number" && parsed.autoCompactWindow >= 0
-          ? Math.round(parsed.autoCompactWindow)
-          : DEFAULT_AUTO_COMPACT_WINDOW,
+      autoCompactWindow: savedCompactWindow(parsed.autoCompactWindow),
       hardwareAcceleration: parsed.hardwareAcceleration !== false, // default on
     };
   } catch {
