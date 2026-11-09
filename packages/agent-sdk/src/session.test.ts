@@ -13,6 +13,7 @@ import {
   planApprovalCard,
   projectMemoryAppend,
   githubSystemAppend,
+  GIT_SYSTEM_APPEND,
   normalizeDirPrefix,
   pathInsideRoots,
   resolveEffort,
@@ -179,6 +180,28 @@ describe("runSettings (auto-compaction budget)", () => {
     expect(s.ultracode).toBe(true);
     expect(s.enableWorkflows).toBe(true);
     expect(s.autoCompactEnabled).toBe(false);
+  });
+
+  it("keeps the git snapshot out of the system prompt in every mode", () => {
+    // The engine's git rules carry a `git status` snapshot taken at process start;
+    // one process per turn means a different prompt prefix after every edit.
+    for (const s of [runSettings(undefined, false), runSettings(0, false), runSettings(undefined, true)]) {
+      expect(s.includeGitInstructions).toBe(false);
+    }
+  });
+});
+
+describe("GIT_SYSTEM_APPEND (our git rules, stated once instead of the engine's)", () => {
+  it("tells the model to read the state itself and keeps the safety rules", () => {
+    expect(GIT_SYSTEM_APPEND).toContain("git status");
+    expect(GIT_SYSTEM_APPEND).toContain("--no-verify");
+    expect(GIT_SYSTEM_APPEND).toMatch(/force-push/);
+    expect(GIT_SYSTEM_APPEND).toMatch(/Commit only when the user asks/);
+  });
+
+  it("has nothing in it that could differ between two turns", () => {
+    // A date, a path or a branch name here would break the prompt cache again.
+    expect(GIT_SYSTEM_APPEND).not.toMatch(/\d{4}-\d{2}-\d{2}|[A-Z]:\\|\/home\/|\$\{/);
   });
 });
 

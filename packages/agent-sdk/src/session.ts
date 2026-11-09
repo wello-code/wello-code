@@ -356,7 +356,29 @@ const PREVIEW_SYSTEM_APPEND = [
   "pane is closed, ask the user to open the «Превью» panel, then call it again.",
 ].join(" ");
 
-const SYSTEM_APPEND = `${ASK_SYSTEM_APPEND}\n\n${SUBAGENT_SYSTEM_APPEND}\n\n${WEB_SEARCH_SYSTEM_APPEND}\n\n${PREVIEW_SYSTEM_APPEND}`;
+/**
+ * Our own git rules, replacing the engine's. The engine's come with a snapshot of
+ * `git status` and recent commits in the system prompt, taken when the engine
+ * process starts — and this app starts one per turn. After any edit the snapshot
+ * differs, the prompt prefix differs, and the whole conversation is re-uploaded
+ * and re-processed on the next turn instead of being read from the prompt cache
+ * (measured: an unchanged prefix is read back after a 4-minute pause; a changed
+ * `Status:` line re-writes everything). The two are one switch in the engine
+ * (includeGitInstructions, see runSettings), so the rules that matter are stated
+ * here, in a block that never changes.
+ */
+export const GIT_SYSTEM_APPEND = [
+  "The repository's current state is not included in this prompt: when it matters,",
+  "run `git status`, `git diff` or `git log` yourself. Commit only when the user asks.",
+  "Before a commit, review `git status` and `git diff`, stage the files you changed by",
+  "name (never sweep in unrelated files or secrets such as .env), and write a short",
+  "message in the repository's own style that says why the change was made. Never",
+  "change git config, never skip hooks (--no-verify), and never force-push or rewrite",
+  "history that was already pushed unless the user explicitly asks; if a hook fails,",
+  "fix the cause and make a new commit instead of amending. Push only when asked.",
+].join(" ");
+
+const SYSTEM_APPEND = `${ASK_SYSTEM_APPEND}\n\n${SUBAGENT_SYSTEM_APPEND}\n\n${WEB_SEARCH_SYSTEM_APPEND}\n\n${PREVIEW_SYSTEM_APPEND}\n\n${GIT_SYSTEM_APPEND}`;
 
 /**
  * Added ONLY in «Ультра». The engine's native ultracode directive is written for
@@ -500,14 +522,19 @@ const ULTRA_SETTINGS: Settings = { ultracode: true, enableWorkflows: true };
  */
 const DEFAULT_AUTO_COMPACT_WINDOW_TOKENS = 200_000;
 
-/** Engine settings for one run: the compaction budget plus the mode's own flags. */
+/**
+ * Engine settings for one run: the compaction budget plus the mode's own flags.
+ * `includeGitInstructions: false` keeps the system prompt identical from turn to
+ * turn — see GIT_SYSTEM_APPEND for why and for the rules we state instead.
+ */
 export function runSettings(autoCompactWindow: number | undefined, ultra: boolean): Settings {
   const budget = autoCompactWindow ?? DEFAULT_AUTO_COMPACT_WINDOW_TOKENS;
   const compaction: Settings =
     budget > 0
       ? { autoCompactEnabled: true, autoCompactWindow: budget }
       : { autoCompactEnabled: false };
-  return ultra ? { ...compaction, ...ULTRA_SETTINGS } : compaction;
+  const base: Settings = { ...compaction, includeGitInstructions: false };
+  return ultra ? { ...base, ...ULTRA_SETTINGS } : base;
 }
 
 /** The UI's effort scale: the engine's five levels plus our «Ультра» position. */
