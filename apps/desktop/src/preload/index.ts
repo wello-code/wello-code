@@ -45,6 +45,11 @@ const api: WelloApi = {
   setApiKey: (key) => ipcRenderer.invoke("wello.setApiKey", key) as Promise<Connection>,
   signInViaBrowser: () => ipcRenderer.invoke("wello.signInViaBrowser") as Promise<Connection>,
   cancelBrowserSignIn: () => ipcRenderer.invoke("wello.cancelBrowserSignIn") as Promise<void>,
+  onSignInCode: (handler: (code: string | null) => void) => {
+    const listener = (_e: unknown, code: string | null): void => handler(code);
+    ipcRenderer.on("wello.signInCode", listener);
+    return () => ipcRenderer.removeListener("wello.signInCode", listener);
+  },
   getConnection: () => ipcRenderer.invoke("wello.getConnection") as Promise<Connection>,
   setPaygOverflow: (enabled) =>
     ipcRenderer.invoke("wello.setPaygOverflow", enabled) as Promise<Connection>,

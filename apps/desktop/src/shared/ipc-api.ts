@@ -530,6 +530,11 @@ export interface WelloApi {
   signInViaBrowser(): Promise<Connection>;
   /** Aborts a pending browser sign-in wait (closes the loopback listener). */
   cancelBrowserSignIn(): Promise<void>;
+  /**
+   * The confirmation code of the browser sign-in that just started (null against
+   * an older gateway). The site asks for it when the browser is on another network.
+   */
+  onSignInCode(handler: (code: string | null) => void): () => void;
   getConnection(): Promise<Connection>;
   /** Public per-model availability (gateway status); null when unreachable. */
   modelStatus(): Promise<Record<string, string> | null>;

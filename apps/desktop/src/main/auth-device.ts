@@ -51,6 +51,12 @@ export class AuthExpiredError extends Error {
 export interface BrowserSignIn {
   /** Where to send the user; already carries the session's public code. */
   verifyUrl: string;
+  /**
+   * The short code the site asks for when the browser is on another network than
+   * this app (anti-phishing, 2026-11-11). Shown on the waiting screen, never put
+   * in the link. Null against a gateway that does not mint one.
+   */
+  confirmCode: string | null;
   /** Resolves with the `wlo_live_…` key, or rejects with one of the errors above. */
   key: Promise<string>;
   cancel: () => void;
@@ -59,6 +65,7 @@ export interface BrowserSignIn {
 interface StartResponse {
   device_code?: unknown;
   user_code?: unknown;
+  confirm_code?: unknown;
   verify_url?: unknown;
   interval?: unknown;
   expires_in?: unknown;
@@ -99,6 +106,10 @@ export async function startBrowserSignIn(opts?: {
   const deviceCode = typeof body.device_code === "string" ? body.device_code : "";
   const userCode = typeof body.user_code === "string" ? body.user_code : "";
   if (!deviceCode || !userCode) throw new Error("start returned no session");
+  const confirmCode =
+    typeof body.confirm_code === "string" && /^[A-Z0-9]{4,12}$/.test(body.confirm_code)
+      ? body.confirm_code
+      : null;
 
   const verifyUrl =
     typeof body.verify_url === "string" && body.verify_url.startsWith("https://")
@@ -162,5 +173,5 @@ export async function startBrowserSignIn(opts?: {
   // catch, a cancel before `await` surfaces as an unhandled rejection.
   key.catch(() => {});
 
-  return { verifyUrl, key, cancel: () => controller.abort() };
+  return { verifyUrl, confirmCode, key, cancel: () => controller.abort() };
 }

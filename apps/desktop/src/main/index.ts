@@ -350,7 +350,7 @@ function registerIpc(): void {
   // there = one click) and we collect the `wlo_live_…` key by polling over HTTPS.
   // The app never sees the account password — it holds only its own key (keychain).
   let pendingAuth: BrowserSignIn | null = null;
-  ipcMain.handle("wello.signInViaBrowser", async (): Promise<Connection> => {
+  ipcMain.handle("wello.signInViaBrowser", async (e): Promise<Connection> => {
     pendingAuth?.cancel(); // a re-click restarts the wait with a fresh session
     let session: BrowserSignIn;
     try {
@@ -359,6 +359,8 @@ function registerIpc(): void {
       return { connected: false, error: "Не удалось начать вход. Проверьте связь и попробуйте ещё раз." };
     }
     pendingAuth = session;
+    // The code the site asks for when the browser is on another network.
+    if (!e.sender.isDestroyed()) e.sender.send("wello.signInCode", session.confirmCode);
     void shell.openExternal(session.verifyUrl);
     try {
       const key = await session.key;

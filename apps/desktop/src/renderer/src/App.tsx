@@ -302,6 +302,9 @@ function Connect({ onConnected }: { onConnected: (c: Connection) => void }) {
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [waiting, setWaiting] = useState(false);
+  // The code the site asks for when the browser is on another network than this
+  // app (a sign-in link someone else sent looks exactly like that).
+  const [signInCode, setSignInCode] = useState<string | null>(null);
   const [show, setShow] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -311,9 +314,12 @@ function Connect({ onConnected }: { onConnected: (c: Connection) => void }) {
   const keyLooksValid = trimmedKey === "" || trimmedKey.startsWith("wlo_");
   const canSubmit = trimmedKey.length > 0;
 
+  useEffect(() => window.wello.onSignInCode(setSignInCode), []);
+
   const signInBrowser = async (): Promise<void> => {
     if (waiting) return;
     setWaiting(true);
+    setSignInCode(null);
     setError(null);
     try {
       const c = await window.wello.signInViaBrowser();
@@ -372,6 +378,18 @@ function Connect({ onConnected }: { onConnected: (c: Connection) => void }) {
                   <span className="spinner" aria-hidden />
                   <span className="loading-row__text">Ждём подтверждения в браузере…</span>
                 </div>
+                {signInCode ? (
+                  <div className="signin-code">
+                    <span className="signin-code__label">Код для сайта</span>
+                    <span className="signin-code__value" aria-label={signInCode.split("").join(" ")}>
+                      {signInCode.slice(0, 3)} {signInCode.slice(3)}
+                    </span>
+                    <span className="signin-code__hint">
+                      Сайт попросит его, если браузер открыт не на этом компьютере. Никому его не
+                      сообщайте.
+                    </span>
+                  </div>
+                ) : null}
                 <button className="button secondary block" onClick={cancelWait}>
                   Отменить
                 </button>

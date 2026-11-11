@@ -133,6 +133,36 @@ describe("startBrowserSignIn", () => {
     await expect(startBrowserSignIn({ fetchImpl: impl })).rejects.toThrow(/start failed/);
   });
 
+  it("hands over the confirmation code to show, and keeps it out of the link", async () => {
+    const { impl } = stubFetch([() => json(200, { status: "pending" })], {
+      device_code: "d".repeat(64),
+      user_code: "u".repeat(48),
+      confirm_code: "AB3K9Q",
+      verify_url: "https://wello.dev/code-auth?code=" + "u".repeat(48),
+      interval: 1,
+    });
+    const s = await startBrowserSignIn({ fetchImpl: impl, timeoutMs: 50 });
+    expect(s.confirmCode).toBe("AB3K9Q");
+    expect(s.verifyUrl).not.toContain("AB3K9Q");
+    s.cancel();
+    await expect(s.key).rejects.toBeInstanceOf(AuthCancelledError);
+  });
+
+  it("shows no code against a gateway that sends none, or sends garbage", async () => {
+    for (const confirm_code of [undefined, "<b>x</b>", 42]) {
+      const { impl } = stubFetch([() => json(200, { status: "pending" })], {
+        device_code: "d".repeat(64),
+        user_code: "u".repeat(48),
+        confirm_code,
+        interval: 1,
+      });
+      const s = await startBrowserSignIn({ fetchImpl: impl, timeoutMs: 50 });
+      expect(s.confirmCode).toBeNull();
+      s.cancel();
+      await expect(s.key).rejects.toBeInstanceOf(AuthCancelledError);
+    }
+  });
+
   it("falls back to the canonical page URL when the server omits verify_url", async () => {
     const { impl } = stubFetch([() => json(200, { status: "pending" })], {
       device_code: "d".repeat(64),
