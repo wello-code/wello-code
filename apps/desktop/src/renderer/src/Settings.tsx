@@ -599,6 +599,27 @@ function GeneralPage({
           />
         </Card>
       </Section>
+      <Section title="Интернет">
+        <Card>
+          <Row
+            rowId="web-search"
+            title="Поиск в интернете"
+            desc={
+              "Агент сам ищет в интернете и открывает сайты, когда это нужно для задачи. " +
+              "Выключите, чтобы он этого не делал. Применится со следующего сообщения."
+            }
+            control={
+              settings ? (
+                <Switch
+                  checked={settings.webSearch !== false}
+                  onChange={(v) => persist({ ...settings, webSearch: v })}
+                  label="Поиск в интернете"
+                />
+              ) : undefined
+            }
+          />
+        </Card>
+      </Section>
       <Section title="Контекст">
         <Card>
           <Row

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseAgentEvent } from "@wello-code/contracts";
 import {
+  baseSystemAppend,
   classifyFailure,
   composeSystemAppend,
   contextFromRunTotal,
@@ -20,8 +21,28 @@ import {
   runSettings,
   taskIdFromCreateResult,
   todosFromToolInput,
+  webSearchDisallowedTools,
   workflowProgressAgents,
 } from "./session";
+
+describe("the internet switch (Настройки → Общее → Интернет)", () => {
+  it("on: the prompt points at our search tool and only AskUserQuestion is denied", () => {
+    expect(baseSystemAppend(true)).toContain("call `web_search`");
+    expect(webSearchDisallowedTools(true)).toEqual(["AskUserQuestion"]);
+  });
+
+  it("off: the prompt says the internet is off and both engine web tools are denied", () => {
+    const s = baseSystemAppend(false);
+    expect(s).toContain("switched internet access off");
+    expect(s).not.toContain("web_search");
+    expect(webSearchDisallowedTools(false)).toEqual(["AskUserQuestion", "WebSearch", "WebFetch"]);
+  });
+
+  it("the rest of our prompt is the same either way", () => {
+    expect(baseSystemAppend(false)).toContain(GIT_SYSTEM_APPEND);
+    expect(baseSystemAppend(true)).toContain(GIT_SYSTEM_APPEND);
+  });
+});
 
 describe("githubSystemAppend (the anti-'gh auth login' steering)", () => {
   it("connected + bridged: git is authenticated, publish via github_create_repo", () => {
@@ -596,6 +617,9 @@ describe("engineFingerprint (what a warmed engine may be reused for)", () => {
     expect(engineFingerprint({ ...base, trusted: true }, conn)).not.toBe(fp);
     expect(engineFingerprint({ ...base, skills: ["design"] }, conn)).not.toBe(fp);
     expect(engineFingerprint({ ...base, resumeSessionId: "s1" }, conn)).not.toBe(fp);
+    // The search tool and the prompt are baked at spawn.
+    expect(engineFingerprint({ ...base, webSearch: false }, conn)).not.toBe(fp);
+    expect(engineFingerprint({ ...base, webSearch: true }, conn)).toBe(fp);
     // A fork loads a different history — never reuse an engine across one.
     expect(engineFingerprint({ ...base, resumeAtMessageUuid: "u1" }, conn)).not.toBe(fp);
     expect(engineFingerprint(base, { ...conn, apiKey: "wlo_live_other" })).not.toBe(fp);

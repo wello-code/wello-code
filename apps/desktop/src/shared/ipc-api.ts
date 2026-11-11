@@ -397,6 +397,13 @@ export interface AppSettings {
    */
   autoCompactWindow?: number;
   /**
+   * Whether the agent may use the internet: our web_search tool and the engine's
+   * WebFetch (default on). Off, neither is offered and both are denied, so the
+   * agent works from the project and what it knows. Read per run, so a change
+   * applies to the very next turn.
+   */
+  webSearch?: boolean;
+  /**
    * Whether the window is composited by the GPU (default on, as Chromium ships).
    *
    * On a laptop with switchable graphics or a flaky driver, GPU compositing is

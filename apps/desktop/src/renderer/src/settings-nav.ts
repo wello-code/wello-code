@@ -91,6 +91,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     page: "general",
+    rowId: "web-search",
+    title: "Поиск в интернете",
+    desc: "Агент сам ищет в интернете и открывает сайты. Можно выключить.",
+  },
+  {
+    page: "general",
     rowId: "about",
     title: "О приложении",
     desc: "Название и версия Wello Code — с копированием.",

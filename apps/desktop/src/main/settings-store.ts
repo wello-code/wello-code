@@ -17,6 +17,7 @@ const DEFAULTS: AppSettings = {
   gitPrDraftDefault: true,
   gitPrInstructions: "",
   autoCompactWindow: DEFAULT_AUTO_COMPACT_WINDOW,
+  webSearch: true,
   hardwareAcceleration: true,
 };
 
@@ -69,6 +70,7 @@ export async function loadSettings(): Promise<AppSettings> {
       gitPrInstructions:
         typeof parsed.gitPrInstructions === "string" ? parsed.gitPrInstructions : "",
       autoCompactWindow: savedCompactWindow(parsed.autoCompactWindow),
+      webSearch: parsed.webSearch !== false, // default on
       hardwareAcceleration: parsed.hardwareAcceleration !== false, // default on
     };
   } catch {

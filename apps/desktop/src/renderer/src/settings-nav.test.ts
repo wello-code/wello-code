@@ -52,6 +52,11 @@ describe("searchSettings", () => {
     expect(hits.some((h) => h.page === "general" && h.rowId === "notifications")).toBe(true);
   });
 
+  it("«интернет» finds the web-search switch on Общее", () => {
+    const hits = searchSettings("интернет");
+    expect(hits.some((h) => h.page === "general" && h.rowId === "web-search")).toBe(true);
+  });
+
   it("«тем» finds the theme picker on Внешний вид", () => {
     const hits = searchSettings("тем");
     expect(hits.some((h) => h.page === "appearance" && h.rowId === "theme")).toBe(true);

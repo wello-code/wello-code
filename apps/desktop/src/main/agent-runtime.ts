@@ -178,6 +178,8 @@ export class AgentRuntime {
         ...(typeof settings.autoCompactWindow === "number"
           ? { autoCompactWindow: settings.autoCompactWindow }
           : {}),
+        // Settings → Общее → Интернет. Read per run, like the above.
+        webSearch: settings.webSearch !== false,
         github: {
           connected: ghStatus.connected,
           ...("login" in ghStatus && ghStatus.login ? { login: ghStatus.login } : {}),

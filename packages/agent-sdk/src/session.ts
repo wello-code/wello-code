@@ -281,6 +281,20 @@ const WEB_SEARCH_SYSTEM_APPEND = [
 ].join(" ");
 
 /**
+ * Said INSTEAD of WEB_SEARCH_SYSTEM_APPEND when the user switched internet access
+ * off (Настройки → Общее → Интернет). The search tool is then not registered and
+ * WebSearch/WebFetch are denied, so without this the model would only find out by
+ * failing; told up front, it works from the project and says what it cannot check.
+ */
+export const WEB_OFF_SYSTEM_APPEND = [
+  "The user has switched internet access off in this app's settings: there is no web",
+  "search and no page fetching in this session, so do not try to search the web or",
+  "fetch URLs. Work from the project files and what you already know. If a task truly",
+  "needs the internet, say so in one sentence and mention that it can be switched back",
+  "on in Настройки → Общее → Интернет.",
+].join(" ");
+
+/**
  * Teaches the model this app's GitHub story — the #1 novice trap seen live was
  * the model sending users to `gh auth login` / github.com/new while the app has
  * its own Device Flow auth and repo tools. The wording depends on whether
@@ -382,7 +396,19 @@ export const GIT_SYSTEM_APPEND = [
   "`add -i`, and pass the commit message on the command line.",
 ].join(" ");
 
-const SYSTEM_APPEND = `${ASK_SYSTEM_APPEND}\n\n${SUBAGENT_SYSTEM_APPEND}\n\n${WEB_SEARCH_SYSTEM_APPEND}\n\n${PREVIEW_SYSTEM_APPEND}\n\n${GIT_SYSTEM_APPEND}`;
+/**
+ * The engine tools a run denies. AskUserQuestion always (it no-ops headlessly and
+ * ours replaces it); WebSearch and WebFetch too once the user switched the internet off.
+ */
+export function webSearchDisallowedTools(webSearch: boolean): string[] {
+  return webSearch ? ["AskUserQuestion"] : ["AskUserQuestion", "WebSearch", "WebFetch"];
+}
+
+/** Our standing additions to the engine's prompt; the web part follows the user's switch. */
+export function baseSystemAppend(webSearch: boolean): string {
+  const web = webSearch ? WEB_SEARCH_SYSTEM_APPEND : WEB_OFF_SYSTEM_APPEND;
+  return `${ASK_SYSTEM_APPEND}\n\n${SUBAGENT_SYSTEM_APPEND}\n\n${web}\n\n${PREVIEW_SYSTEM_APPEND}\n\n${GIT_SYSTEM_APPEND}`;
+}
 
 /**
  * Added ONLY in «Ультра». The engine's native ultracode directive is written for
@@ -711,6 +737,9 @@ export function engineFingerprint(req: SdkRunRequest, conn: WelloConnection): st
     dirs: [...(req.additionalDirectories ?? [])].sort(),
     mcp: req.mcpServers ?? null,
     autoCompactWindow: req.autoCompactWindow ?? null,
+    // The tool set and the prompt are baked at spawn: a warmed engine with search
+    // must not serve a turn the user just switched it off for.
+    webSearch: req.webSearch !== false,
     github: req.github ?? null,
     instructions: req.projectInstructions ?? null,
     // Memory rides the system prompt, and the prompt is baked at spawn — a
@@ -759,6 +788,12 @@ export interface SdkRunRequest {
    * see DEFAULT_AUTO_COMPACT_WINDOW_TOKENS for why there is one at all.
    */
   autoCompactWindow?: number;
+  /**
+   * Whether the agent may use the internet (Настройки → Общее → Интернет). false =
+   * no web_search tool, WebSearch and WebFetch denied, and the prompt says so.
+   * Absent = on.
+   */
+  webSearch?: boolean;
   /** Local plugin/skill directories to load into the engine. */
   pluginPaths?: string[];
   /**
@@ -1076,6 +1111,8 @@ export class SdkAgentSession {
    */
   private build(req: SdkRunRequest, callbacks: AgentRunCallbacks): PreparedEngine {
     const live: LiveTurn = { req, callbacks, correlationId: randomUUID() };
+    // Settings → Общее → Интернет. Part of the fingerprint, so fixed for this engine.
+    const webSearch = req.webSearch !== false;
     const emit = (type: string, data: unknown): void => {
       live.callbacks.onEvent(
         parseAgentEvent({
@@ -1287,27 +1324,35 @@ export class SdkAgentSession {
             return { content: [{ type: "text", text: formatAnswer(request, answer) }] };
           },
         ),
-        tool(
-          WEB_SEARCH_TOOL,
-          "Search the web for current information. Returns titles, URLs and snippets; " +
-            "use WebFetch afterwards to read a specific page in full.",
-          {
-            query: z.string().min(1).max(400).describe("The search query."),
-          },
-          async (args) => {
-            const outcome = await gatewayWebSearch(
-              codeApiBase(this.conn.baseUrl),
-              this.conn.apiKey,
-              String(args.query),
-            );
-            if (!outcome.ok) {
-              return { content: [{ type: "text", text: outcome.error }], isError: true };
-            }
-            return {
-              content: [{ type: "text", text: formatWebSearchHits(String(args.query), outcome.hits) }],
-            };
-          },
-        ),
+        // Not registered at all when the user switched the internet off: a tool
+        // that answers "disabled" still invites the model to keep trying it.
+        ...(webSearch
+          ? [
+              tool(
+                WEB_SEARCH_TOOL,
+                "Search the web for current information. Returns titles, URLs and snippets; " +
+                  "use WebFetch afterwards to read a specific page in full.",
+                {
+                  query: z.string().min(1).max(400).describe("The search query."),
+                },
+                async (args) => {
+                  const outcome = await gatewayWebSearch(
+                    codeApiBase(this.conn.baseUrl),
+                    this.conn.apiKey,
+                    String(args.query),
+                  );
+                  if (!outcome.ok) {
+                    return { content: [{ type: "text", text: outcome.error }], isError: true };
+                  }
+                  return {
+                    content: [
+                      { type: "text", text: formatWebSearchHits(String(args.query), outcome.hits) },
+                    ],
+                  };
+                },
+              ),
+            ]
+          : []),
         tool(
           PREVIEW_LOOK_TOOL,
           "Capture what the app's built-in browser preview pane currently shows: saves a " +
@@ -1469,7 +1514,7 @@ export class SdkAgentSession {
     const { engineEffort, thinkingBudget, ultra } = resolveEffort(req.effort);
     // Self-injected project instructions (AGENTS.md): the engine only loads
     // CLAUDE.md natively, so the runtime reads AGENTS.md and appends it here.
-    const baseAppend = `${SYSTEM_APPEND}\n\n${githubSystemAppend(req.github, Boolean(req.gitEnv))}\n\n${projectMemoryAppend(req.projectMemory)}`;
+    const baseAppend = `${baseSystemAppend(webSearch)}\n\n${githubSystemAppend(req.github, Boolean(req.gitEnv))}\n\n${projectMemoryAppend(req.projectMemory)}`;
     const systemAppend = composeSystemAppend({
       base: baseAppend,
       ultra,
@@ -1526,7 +1571,9 @@ export class SdkAgentSession {
       // model as "web search is forbidden" and it refuses our web_search too
       // (seen live) — the system-append steers it away instead, and an
       // accidental WebSearch call just upstream-errors and self-corrects.
-      disallowedTools: ["AskUserQuestion"],
+      // With the internet switched off that reading is exactly the point, so both
+      // of the engine's web tools are denied outright.
+      disallowedTools: webSearchDisallowedTools(webSearch),
       stderr: (data) => live.callbacks.onLog?.(data),
       canUseTool,
     };
