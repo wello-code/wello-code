@@ -103,6 +103,7 @@ export const MODELS_1M_CONTEXT: readonly string[] = [
   "glm-5.3-flash",
   "glm-5.3-flash-uncensored",
   "claude-fable-5.2",
+  "gemini-4-carbon",
 ];
 
 /**

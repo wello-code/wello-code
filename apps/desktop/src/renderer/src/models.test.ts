@@ -273,6 +273,10 @@ describe("the picker and the fallback agree", () => {
       "gpt-6-astra",
       "glm-5.3-flash",
       "glm-5.3-flash-uncensored",
+      // 2026-11-12, on the same bar: two real agent turns of this app's engine (run
+      // the tests, fix two bugs, run them again) read the earlier conversation back
+      // from the cache on every step after the first, 6 of 6.
+      "gemini-4-carbon",
       "claude-opus-5.5-stable",
       "claude-sonnet-5.5-stable",
       "gpt-6.1-sol-stable",
@@ -281,5 +285,9 @@ describe("the picker and the fallback agree", () => {
       // conversation back from the cache on every step.
       "claude-fable-5.2",
     ]);
+  });
+
+  it("says in the picker that Gemini 4 Carbon draws the allowance faster", () => {
+    expect(MODELS.find((m) => m.id === "gemini-4-carbon")?.hint).toMatch(/лимит/i);
   });
 });
