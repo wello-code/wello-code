@@ -2674,6 +2674,23 @@ body.is-col-resizing {
   color: var(--text-secondary);
   font-size: 11px;
 }
+/* A model on a deal (status «promo»): a small green «−50%» chip after the name
+   and the hint swapped for what the deal gives. */
+.modelsel__promo {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  color: var(--success);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+  vertical-align: 1px;
+}
+.modelsel__item-hint--promo {
+  color: var(--success);
+}
 /* A model the gateway reports as down: muted row + amber dot, still clickable
    (an outage can end any minute — we mark, we don't lock). */
 .modelsel__item.is-down .modelsel__item-label {

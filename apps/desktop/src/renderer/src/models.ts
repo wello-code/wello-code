@@ -135,8 +135,8 @@ function answering(said: string | null): string | null {
   return said.startsWith(`${STATUS_HIDDEN}:`) ? said.slice(STATUS_HIDDEN.length + 1) : said;
 }
 
-/** What the status says about one model, across the dot/dash id split. */
-function statusOf(status: Record<string, string> | null | undefined, id: string): string | null {
+/** The raw word for one model, deal suffix included, across the dot/dash id split. */
+function rawStatusOf(status: Record<string, string> | null | undefined, id: string): string | null {
   if (!status) return null;
   const norm = (s: string): string => s.toLowerCase().replace(/\./g, "-");
   const want = norm(id);
@@ -144,6 +144,36 @@ function statusOf(status: Record<string, string> | null | undefined, id: string)
     if (norm(key) === want) return value;
   }
   return null;
+}
+
+/** What the status says about one model, with any deal taken off (see modelPromo). */
+function statusOf(status: Record<string, string> | null | undefined, id: string): string | null {
+  const raw = rawStatusOf(status, id);
+  if (raw === null) return null;
+  const bar = raw.indexOf("|");
+  return bar === -1 ? raw : raw.slice(0, bar);
+}
+
+/**
+ * A deal on this model, if the service runs one right now: the discount in
+ * percent and when it ends. For a subscription it means the model spends the
+ * limit slower (at 50%, half as fast); the main process puts it after a bar in the
+ * status word (model-status.ts). Null once the end has passed, even before the
+ * next status poll catches up.
+ */
+export function modelPromo(
+  status: Record<string, string> | null | undefined,
+  id: string,
+  nowMs: number = Date.now(),
+): { pct: number; endsAt: string } | null {
+  const raw = rawStatusOf(status, id);
+  const m = raw ? /\|promo=(\d{1,2})@(.+)$/.exec(raw) : null;
+  if (!m) return null;
+  const pct = Number(m[1]);
+  const endsAt = m[2]!;
+  const end = Date.parse(endsAt);
+  if (!(pct >= 1 && pct <= 90) || !Number.isFinite(end) || end <= nowMs) return null;
+  return { pct, endsAt };
 }
 
 /**

@@ -7,8 +7,32 @@ import {
   contextWindowFor,
   listedModels,
   modelAvailability,
+  modelPromo,
   pickerShelves,
 } from "./models";
+
+describe("modelPromo (a deal in the status word)", () => {
+  const now = Date.parse("2026-11-14T16:00:00Z");
+  const status = {
+    "gpt-6-astra": "available|promo=50@2026-11-15T14:00:00.000Z",
+    "gpt-6.1-sol-stable": "hidden:degraded|promo=50@2026-11-15T14:00:00.000Z",
+    "claude-opus-5": "available",
+  };
+
+  it("reads the deal and leaves the rest of the word as it was", () => {
+    expect(modelPromo(status, "gpt-6-astra", now)).toEqual({ pct: 50, endsAt: "2026-11-15T14:00:00.000Z" });
+    expect(modelPromo(status, "claude-opus-5", now)).toBeNull();
+    // The deal suffix must not change what the word says about the model itself.
+    expect(modelAvailability(status, "gpt-6-astra")).toBe(true);
+    expect(modelAvailability(status, "gpt-6.1-sol-stable")).toBe(false);
+    expect(listedModels(status).some((m) => m.id === "gpt-6.1-sol-stable")).toBe(false);
+    expect(listedModels(status).some((m) => m.id === "gpt-6-astra")).toBe(true);
+  });
+
+  it("is gone once the end has passed, before the next poll", () => {
+    expect(modelPromo(status, "gpt-6-astra", Date.parse("2026-11-15T14:00:01Z"))).toBeNull();
+  });
+});
 
 describe("modelAvailability (picker health marks)", () => {
   // A live shape from the gateway's public status: catalog ids with dots.

@@ -53,6 +53,23 @@ describe("modelStatusFromBody", () => {
     }
   });
 
+  it("carries a deal after a bar, and drops one it cannot read", () => {
+    const body = {
+      models: {
+        "gpt-6-astra": { availability: "available", promo: { pct: 50, endsAt: "2026-11-15T14:00:00Z" } },
+        "gpt-6.1-sol-stable": { availability: "degraded", hidden: true, promo: { pct: 50, endsAt: "2026-11-15T14:00:00.000Z" } },
+        "claude-opus-5": { availability: "available", promo: { pct: 150, endsAt: "2026-11-15T14:00:00Z" } },
+        "claude-sonnet-5": { availability: "available", promo: { pct: 50, endsAt: "soon" } },
+      },
+    };
+    expect(modelStatusFromBody(body)).toEqual({
+      "gpt-6-astra": "available|promo=50@2026-11-15T14:00:00.000Z",
+      "gpt-6.1-sol-stable": "hidden:degraded|promo=50@2026-11-15T14:00:00.000Z",
+      "claude-opus-5": "available",
+      "claude-sonnet-5": "available",
+    });
+  });
+
   it("skips entries it cannot read instead of guessing", () => {
     const body = {
       models: { a: null, b: "available", c: { availability: 5 }, d: { availability: "available" } },

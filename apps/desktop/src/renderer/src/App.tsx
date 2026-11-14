@@ -61,9 +61,20 @@ import {
   contextWindowFor,
   listedModels,
   modelAvailability,
+  modelPromo,
   pickerShelves,
   type PickerModel,
 } from "./models";
+
+/** When a deal ends, in the person's own time: «15 нояб., 17:00». */
+function promoUntil(iso: string): string {
+  return new Date(iso).toLocaleString("ru-RU", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 import { deriveProjects, filterByProject, projectExists, type Project } from "./projects";
 import { detectSlash, rankSlashCommands, type SlashQuery } from "./slash-command";
 import { commandArgString, expandCommandTemplate } from "../../shared/slash-template";
@@ -5946,6 +5957,7 @@ function ModelSelect({
   const alive = listed.find((m) => modelAvailability(health, m.id) !== false);
   const item = (m: PickerModel) => {
     const down = modelAvailability(health, m.id) === false;
+    const promo = down ? null : modelPromo(health, m.id);
     return (
       <button
         key={m.id}
@@ -5961,9 +5973,18 @@ function ModelSelect({
           <span className="modelsel__item-label">
             {m.label}
             {down ? <span className="modelsel__downdot" aria-hidden /> : null}
+            {/* «−50%», never «×2»: next to a model «×2» reads as «burns the limit
+                twice as fast», the opposite of the deal. */}
+            {promo ? <span className="modelsel__promo">−{promo.pct}%</span> : null}
           </span>
-          <span className="modelsel__item-hint">
-            {down ? "Сейчас недоступна — сервис восстанавливается" : m.hint}
+          <span className={`modelsel__item-hint ${promo ? "modelsel__item-hint--promo" : ""}`}>
+            {down
+              ? "Сейчас недоступна — сервис восстанавливается"
+              : promo
+                ? `Акция: лимит тратится ${
+                    promo.pct === 50 ? "вдвое медленнее" : `на ${promo.pct}% меньше`
+                  }, до ${promoUntil(promo.endsAt)}`
+                : m.hint}
           </span>
         </span>
         {m.id === value ? <Icon name="check" size={13} /> : null}
