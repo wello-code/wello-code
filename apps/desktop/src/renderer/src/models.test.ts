@@ -219,6 +219,12 @@ describe("contextWindowFor", () => {
     expect(contextWindowFor("gpt-5.6-sol", null)).toBe(400_000);
     expect(contextWindowFor("gpt-6-astra", null)).toBe(400_000);
     expect(contextWindowFor("gpt-6.1-sol-stable", null)).toBe(400_000);
+    expect(contextWindowFor("gpt-6.2-sol", null)).toBe(400_000);
+    expect(contextWindowFor("gpt-6.2-astra", null)).toBe(400_000);
+  });
+
+  it("gives GPT-6 Luna its smaller window", () => {
+    expect(contextWindowFor("gpt-6-luna", null)).toBe(272_000);
   });
 
   it("gives the stable Opus its million, like the other Opus", () => {
@@ -295,6 +301,13 @@ describe("the picker and the fallback agree", () => {
       "gpt-5.6-terra",
       "gpt-5.6-sol",
       "gpt-6-astra",
+      // 2026-11-17, on the same bar: a two-tool step of this app's bridge shape
+      // (both calls in one streamed step, with their arguments, then an answer from
+      // the results), and a step that continues a conversation is priced by what it
+      // adds, not by the whole conversation again.
+      "gpt-6.2-sol",
+      "gpt-6.2-astra",
+      "gpt-6-luna",
       "glm-5.3-flash",
       "glm-5.3-flash-uncensored",
       // 2026-11-12, on the same bar: two real agent turns of this app's engine (run
@@ -313,5 +326,23 @@ describe("the picker and the fallback agree", () => {
 
   it("says in the picker that Gemini 4 Carbon draws the allowance faster", () => {
     expect(MODELS.find((m) => m.id === "gemini-4-carbon")?.hint).toMatch(/лимит/i);
+  });
+
+  it("says in the picker that GPT-6.2 Astra draws the allowance faster, and never offers it by default", () => {
+    expect(MODELS.find((m) => m.id === "gpt-6.2-astra")?.hint).toMatch(/лимит/i);
+    expect(MODELS[0]!.id).not.toBe("gpt-6.2-astra");
+  });
+
+  it("lists the new GPT models only while the service offers them", () => {
+    // The service hides a model it has no route for; the build may ship before that
+    // route is switched on.
+    const off = { "gpt-6.2-sol": STATUS_HIDDEN, "gpt-6.2-astra": STATUS_HIDDEN, "gpt-6-luna": "available" };
+    const ids = listedModels(off).map((m) => m.id);
+    expect(ids).not.toContain("gpt-6.2-sol");
+    expect(ids).not.toContain("gpt-6.2-astra");
+    expect(ids).toContain("gpt-6-luna");
+    const on = listedModels({ "gpt-6.2-sol": "available", "gpt-6.2-astra": "available" }).map((m) => m.id);
+    expect(on).toContain("gpt-6.2-sol");
+    expect(on).toContain("gpt-6.2-astra");
   });
 });

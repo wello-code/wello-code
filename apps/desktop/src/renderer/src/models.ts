@@ -47,6 +47,16 @@ export const MODELS: PickerModel[] = [
   // fifth of the time and reads it as the product cheating them, so the warning
   // belongs in the picker itself rather than in a changelog nobody opens.
   { id: "gpt-6-astra", label: "GPT Astra", hint: "Самая сильная, но расходует лимит впятеро быстрее" },
+  // The next generation of the two above. They are listed only while the service
+  // offers them (the status hides a model it does not serve, see listedModels), so
+  // a build that knows about them is harmless before that day. A step on GPT-6.2
+  // Astra draws about five times what one on GPT-6.2 Sol does, and its hint says so
+  // for the same reason Astra's does.
+  { id: "gpt-6.2-sol", label: "GPT-6.2 Sol", hint: "Новейший GPT: быстрый и экономный" },
+  { id: "gpt-6.2-astra", label: "GPT-6.2 Astra", hint: "Новейший флагман GPT, расходует лимит впятеро быстрее GPT-6.2 Sol" },
+  // The lightest of the family: a step draws a small fraction of what one on any
+  // other model here does.
+  { id: "gpt-6-luna", label: "GPT-6 Luna", hint: "Самая лёгкая и дешёвая, для простых задач" },
   // Flash cannot see images: the service drops them without a word, so the hint
   // says it before someone attaches a screenshot and waits for an answer about it.
   { id: "glm-5.3-flash", label: "GLM 5.3 Flash", hint: "Быстрая и недорогая, не видит картинки" },
@@ -115,6 +125,10 @@ const KNOWN_CONTEXT_WINDOW: Record<string, number> = {
   "gpt-5.6-sol": 400_000,
   "gpt-6-astra": 400_000,
   "gpt-6.1-sol-stable": 400_000,
+  "gpt-6.2-sol": 400_000,
+  "gpt-6.2-astra": 400_000,
+  // Smaller than the rest of the family: the ring must fill sooner on this one.
+  "gpt-6-luna": 272_000,
   ...Object.fromEntries(MODELS_1M_CONTEXT.map((id) => [id, CONTEXT_WINDOW_1M])),
 };
 
