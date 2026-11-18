@@ -61,6 +61,9 @@ export const MODELS: PickerModel[] = [
   // says it before someone attaches a screenshot and waits for an answer about it.
   { id: "glm-5.3-flash", label: "GLM 5.3 Flash", hint: "Быстрая и недорогая, не видит картинки" },
   { id: "glm-5.3-flash-uncensored", label: "GLM 5.3 Flash Uncensored", hint: "Без фильтров контента, думает дольше" },
+  // Reasons before every step and sees images. A step draws about a third of what
+  // one on Opus 5 does, so the hint leads with that.
+  { id: "qwen4-max-preview", label: "Qwen 4 Max Preview", hint: "Флагман Alibaba: недорогая, думает над каждым шагом" },
   // Google's flagship. A step draws about what one on Sonnet 5.5 does, 1.7 times
   // one on Opus 5 (2.5K new tokens, 28K read back, 150 out), and the hint says so.
   { id: "gemini-4-carbon", label: "Gemini 4 Carbon", hint: "Флагман Google, лимит тратится почти вдвое быстрее Opus 5" },

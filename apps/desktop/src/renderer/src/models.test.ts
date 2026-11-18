@@ -310,6 +310,9 @@ describe("the picker and the fallback agree", () => {
       "gpt-6-luna",
       "glm-5.3-flash",
       "glm-5.3-flash-uncensored",
+      // 2026-11-18, on the same bar: the same prompt sent again read 99% of itself
+      // back from the cache, and a longer one read back the part it shared.
+      "qwen4-max-preview",
       // 2026-11-12, on the same bar: two real agent turns of this app's engine (run
       // the tests, fix two bugs, run them again) read the earlier conversation back
       // from the cache on every step after the first, 6 of 6.
