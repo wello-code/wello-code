@@ -316,7 +316,15 @@ describe("the picker and the fallback agree", () => {
       // 2026-11-12, on the same bar: two real agent turns of this app's engine (run
       // the tests, fix two bugs, run them again) read the earlier conversation back
       // from the cache on every step after the first, 6 of 6.
+      // Argon and Flash joined 2026-11-26: they read their cache back as Carbon
+      // does. Neon and Hydrogen joined the same day WITHOUT clearing this bar, on
+      // purpose: they never read their cache back, so every step pays
+      // its whole context again. Their hints say so in the picker (tested below).
+      "gemini-4-argon",
       "gemini-4-carbon",
+      "gemini-4-neon",
+      "gemini-4-hydrogen",
+      "gemini-3.8-flash",
       "claude-opus-5.5-stable",
       "claude-sonnet-5.5-stable",
       "gpt-6.1-sol-stable",
@@ -327,8 +335,15 @@ describe("the picker and the fallback agree", () => {
     ]);
   });
 
-  it("says in the picker that Gemini 4 Carbon draws the allowance faster", () => {
-    expect(MODELS.find((m) => m.id === "gemini-4-carbon")?.hint).toMatch(/лимит/i);
+  it("says in the picker how fast each Gemini draws the allowance", () => {
+    for (const id of ["gemini-4-argon", "gemini-4-carbon", "gemini-4-neon", "gemini-4-hydrogen", "gemini-3.8-flash"]) {
+      expect(MODELS.find((m) => m.id === id)?.hint, id).toMatch(/лимит/i);
+    }
+    // The two that never read their cache back say so: on a long task that is
+    // what makes them heavy, and nothing else in the picker would tell.
+    for (const id of ["gemini-4-neon", "gemini-4-hydrogen"]) {
+      expect(MODELS.find((m) => m.id === id)?.hint, id).toMatch(/без кэша/i);
+    }
   });
 
   it("says in the picker that GPT-6.2 Astra draws the allowance faster, and never offers it by default", () => {

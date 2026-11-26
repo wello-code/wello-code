@@ -64,9 +64,16 @@ export const MODELS: PickerModel[] = [
   // Reasons before every step and sees images. A step draws about a third of what
   // one on Opus 5 does, so the hint leads with that.
   { id: "qwen4-max-preview", label: "Qwen 4 Max Preview", hint: "Флагман Alibaba: недорогая, думает над каждым шагом" },
-  // Google's flagship. A step draws about what one on Sonnet 5.5 does, 1.7 times
-  // one on Opus 5 (2.5K new tokens, 28K read back, 150 out), and the hint says so.
-  { id: "gemini-4-carbon", label: "Gemini 4 Carbon", hint: "Флагман Google, лимит тратится почти вдвое быстрее Opus 5" },
+  // Google. On a typical step (2.5K new tokens, 28K read back, 150 out) Argon and
+  // Carbon draw about two fifths of what Opus 5.5 does, Flash about a tenth. Neon
+  // and Hydrogen never read their cache back, so every step pays its whole context
+  // as new input: Neon draws several times what Opus 5.5 does, Hydrogen about as
+  // much, more on long tasks. Their hints say that, since nothing else would.
+  { id: "gemini-4-argon", label: "Gemini 4 Argon", hint: "Новый Gemini, лимит тратится примерно вдвое медленнее Opus 5.5" },
+  { id: "gemini-4-carbon", label: "Gemini 4 Carbon", hint: "Флагман Google, лимит тратится примерно вдвое медленнее Opus 5.5" },
+  { id: "gemini-4-neon", label: "Gemini 4 Neon", hint: "Для трудных задач, без кэша: лимит тратится в разы быстрее Opus 5.5" },
+  { id: "gemini-4-hydrogen", label: "Gemini 4 Hydrogen", hint: "Быстрый, но без кэша: лимит тратится примерно как на Opus 5.5" },
+  { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", hint: "Быстрая и экономная, лимит тратится в разы медленнее Opus 5.5" },
   // The stable shelf. Last on purpose: the default is the first entry, and nobody
   // should land on a model that draws the allowance several times faster without
   // having chosen it. Each hint says what the choice costs, for the same reason
